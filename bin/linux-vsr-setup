@@ -91,6 +91,15 @@ analyze_dumps() {
         grep -q "vsr_badge_mask" "${f}" 2>/dev/null && marks="${marks}BADGE "
         echo "  ${base}: ${marks:-other}"
     done
+    # check file-recorded hits first (redirection-proof)
+    if [ -f /tmp/vsr_hits.log ]; then
+        echo "[linux-vsr-setup] verdict: WORKS - patched shaders:"
+        cat /tmp/vsr_hits.log
+        echo "look for small striped badge at video bottom-right corner."
+        echo "to keep it always on, add launcher to autostart:"
+        echo "  ./bin/linux-vsr-setup --install-desktop zen-browser"
+        return 0
+    fi
     # check browser log for interception proof when available
     hits="$(grep -c "intercepted video shader" /tmp/vsr_browser.log 2>/dev/null || true)"
     if [ "${hits}" -gt 0 ]; then
@@ -155,6 +164,8 @@ launch_with_dump() {
     # clean previous dumps
     rm -rf "${dump_dir}"
     mkdir -p "${dump_dir}"
+    # clean previous hit log for honest verdict
+    rm -f /tmp/vsr_hits.log
     # warn when main instance already running (before preload export)
     base="$(basename "${browser}")"
     if command -v pgrep &>/dev/null && pgrep -f "${base}" &>/dev/null; then
@@ -220,6 +231,9 @@ launch_with_dump() {
     # count interceptions from browser log for honest verdict
     hits="$(grep -c "intercepted video shader" "${browser_log}" 2>/dev/null || true)"
     echo "[linux-vsr-setup] interceptions in browser log: ${hits} (see ${browser_log})"
+    # count file-recorded hits as redirection-proof verdict source
+    file_hits="$(wc -l < /tmp/vsr_hits.log 2>/dev/null || echo 0)"
+    echo "[linux-vsr-setup] interceptions in hit log: ${file_hits} (see /tmp/vsr_hits.log)"
     # analyze results
     analyze_dumps || true
     # offer to kill dump instance

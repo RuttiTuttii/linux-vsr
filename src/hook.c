@@ -412,6 +412,14 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
                 free(combined);
                 // log success in debug mode
                 vsr_log_debug("patched video pipeline shader (%zu -> %zu bytes)", total_len, patched_len);
+                // record hit to file for redirection-proof verdict
+                FILE *hit_fp = fopen("/tmp/vsr_hits.log", "a");
+                if (hit_fp) {
+                    fprintf(hit_fp, "pid=%d shader=%u mode=%s sharp=%.2f wm=%d %zu->%zu\n",
+                        (int)getpid(), shader, mode, (double)sharpness,
+                        watermark ? 1 : 0, total_len, patched_len);
+                    fclose(hit_fp);
+                }
                 return;
             }
             // release oversized patch
