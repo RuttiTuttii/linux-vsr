@@ -199,3 +199,15 @@ example:
 ```bash
 VSR_MODE=cas VSR_SHARPNESS=0.30 ./bin/linux-vsr
 ```
+
+---
+
+### known issues and limitations
+
+* **browser sandboxing (security trade-off):** injecting via `LD_PRELOAD` into gecko gpu/rdd child processes requires disabling process sandboxes (`MOZ_DISABLE_*_SANDBOX=1`). this is an intentional trade-off required for shader interception.
+* **multi-instance remote forward:** if zen browser or firefox is already running, launching `./bin/linux-vsr` without profile isolation forwards to the existing instance without preloading `libvsr.so`. you must either launch the browser with the wrapper initially or attach to the running pid via `./bin/linux-vsr attach <PID>`.
+* **webrender focus:** the shader patcher is currently tuned and verified against webrender (zen browser, mozilla firefox). chromium (skia) and mpv (gpu-next) utilize different shader variable names and pipelines; dedicated signatures for them are work in progress.
+* **no in-video interactive gui:** interactive buttons and overlays cannot be drawn from the `glShaderSource` compilation layer without separate render passes. all live tuning is handled via the `linux-vsr-ctl` cli tool.
+* **vulkan backend bypass:** if the browser is forced to run on pure vulkan, opengl/egl interception is bypassed. support for vulkan requires hooking `vkCreateShaderModule` with spir-v byte patching.
+* **ai super resolution status:** compiled tensorrt `.engine` models for rtx 5070 are prepared, but direct in-pipeline cuda-gl interop inference inside the hook is currently under development.
+
