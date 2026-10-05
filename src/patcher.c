@@ -25,9 +25,12 @@ bool vsr_patcher_is_target_shader(const char *source) {
     bool legacy = (strstr(source, "sample_yuv") != NULL)
         && (strstr(source, "TEX_SAMPLE(sColor0, uv_y).r") != NULL);
     // match modern firefox/zen format (157+, webrender nagle)
-    bool modern = (strstr(source, "ycbcr_sample") != NULL)
-        && (strstr(source, "vUV_y") != NULL)
-        && (strstr(source, "vUVBounds_y") != NULL)
+    // real desktop glsl uses vUv_Y/vUvBounds_Y, some builds use vUV_y variant
+    bool has_uv_pair = (strstr(source, "vUv_Y") != NULL && strstr(source, "vUvBounds_Y") != NULL)
+        || (strstr(source, "vUV_y") != NULL && strstr(source, "vUVBounds_y") != NULL);
+    bool modern = (strstr(source, "ycbcr") != NULL || strstr(source, "Ycbcr") != NULL
+            || strstr(source, "ps_quad_yuv") != NULL || strstr(source, "Debiased") != NULL)
+        && has_uv_pair
         && (strstr(source, "sColor0") != NULL);
     // accept either pipeline
     return legacy || modern;
@@ -192,11 +195,13 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
     // detect legacy pipeline first
     bool is_legacy = (strstr(source, "vec4 sample_yuv(") != NULL)
         && (strstr(source, "ycbcr_sample.x = TEX_SAMPLE(sColor0, uv_y).r;") != NULL);
-    // detect modern firefox/zen pipeline
+    // detect modern firefox/zen pipeline with real identifier pairs
+    bool has_real_pair = (strstr(source, "vUv_Y") != NULL) && (strstr(source, "vUvBounds_Y") != NULL);
+    bool has_alt_pair = (strstr(source, "vUV_y") != NULL) && (strstr(source, "vUVBounds_y") != NULL);
     bool is_modern = !is_legacy
-        && (strstr(source, "ycbcr_sample") != NULL)
-        && (strstr(source, "vUV_y") != NULL)
-        && (strstr(source, "vUVBounds_y") != NULL)
+        && (strstr(source, "ycbcr") != NULL || strstr(source, "Ycbcr") != NULL
+            || strstr(source, "ps_quad_yuv") != NULL || strstr(source, "Debiased") != NULL)
+        && (has_real_pair || has_alt_pair)
         && (strstr(source, "sColor0") != NULL);
     // reject unknown layout
     if (!is_legacy && !is_modern) {
@@ -322,9 +327,23 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
     // scan staged buffer for texture(sColor0, ...) luma fetches
     // use dynamic output that grows only when replacements found
     size_t staged_cur = vsr_safe_strlen(staged, VSR_MAX_OUTPUT_SIZE + 1);
-    // replacement snippet for modern pipeline
-    const char *cas_call = "sample_luma_cas(sColor0, vUV_y, vUVBounds_y)";
-    size_t cas_len = strlen(cas_call);
+    // pick uv and bounds identifiers present in this shader
+    const char *uv_name = "vUv_Y";
+    const char *bounds_name = "vUvBounds_Y";
+    if (strstr(staged, "vUv_Y") == NULL && strstr(staged, "vUV_y") != NULL) {
+        uv_name = "vUV_y";
+        bounds_name = "vUVBounds_y";
+    }
+    // build replacement snippet for modern pipeline
+    char cas_call[128] = {0};
+    int cas_written = snprintf(cas_call, sizeof(cas_call), "sample_luma_cas(sColor0, %s, %s)", uv_name, bounds_name);
+    // validate replacement format
+    if (cas_written <= 0 || (size_t)cas_written >= sizeof(cas_call)) {
+        free(staged);
+        vsr_safety_set_error("inject cas call format failed");
+        return NULL;
+    }
+    size_t cas_len = (size_t)cas_written;
     // first pass: count replacements to size output
     size_t replaced = 0;
     const char *scan = staged;

@@ -110,8 +110,19 @@ void test_patcher_target_identification(void) {
         "float sample_luma_cas() { return 1.0; }\n"
         "vec4 sample_yuv(int f) { ycbcr_sample.x = TEX_SAMPLE(sColor0, uv_y).r; }\n";
     assert(vsr_patcher_is_target_shader(patched) == false);
-    // assert modern firefox/zen format recognized
+    // assert modern firefox/zen format recognized (real desktop glsl names)
     const char *modern_yuv =
+        "#version 150\n"
+        "// ps_quad_yuv\n"
+        "in vec2 vUv_Y;\n"
+        "flat in vec4 vUvBounds_Y;\n"
+        "void main() {\n"
+        "    vec3 ycbcr_sample_1;\n"
+        "    ycbcr_sample_1.x = texture (sColor0, min (max (vUv_Y, vUvBounds_Y.xy), vUvBounds_Y.zw)).x;\n"
+        "}\n";
+    assert(vsr_patcher_is_target_shader(modern_yuv) == true);
+    // assert alternate uv naming recognized as well
+    const char *modern_alt =
         "#version 300 es\n"
         "in vec2 vUV_y;\n"
         "flat in vec4 vUVBounds_y;\n"
@@ -119,7 +130,7 @@ void test_patcher_target_identification(void) {
         "    vec3 ycbcr_sample_1;\n"
         "    ycbcr_sample_1.x = texture (sColor0, min (max (vUV_y, vUVBounds_y.xy), vUVBounds_y.zw)).x;\n"
         "}\n";
-    assert(vsr_patcher_is_target_shader(modern_yuv) == true);
+    assert(vsr_patcher_is_target_shader(modern_alt) == true);
 }
 
 // unit test for upscaler injection
@@ -200,20 +211,21 @@ void test_patcher_injection_safety(void) {
     assert(grown != NULL);
     assert(strstr(grown, "sample_luma_cas(sColor0, vUV_y, vUVBounds_y)") != NULL);
     free(grown);
-    // test modern pipeline injection
+    // test modern pipeline injection with real desktop glsl names
     const char *modern =
-        "#version 300 es\n"
-        "in vec2 vUV_y;\n"
-        "flat in vec4 vUVBounds_y;\n"
+        "#version 150\n"
+        "// ps_quad_yuv\n"
+        "in vec2 vUv_Y;\n"
+        "flat in vec4 vUvBounds_Y;\n"
         "void main() {\n"
         "    vec3 ycbcr_sample_1;\n"
-        "    ycbcr_sample_1.x = texture (sColor0, min (max (vUV_y, vUVBounds_y.xy), vUVBounds_y.zw)).x;\n"
+        "    ycbcr_sample_1.x = texture (sColor0, min (max (vUv_Y, vUvBounds_Y.xy), vUvBounds_Y.zw)).x;\n"
         "}\n";
     char *mod = vsr_patcher_inject_upscaler_full(modern, "cas", 0.22f, true, 0.45f, 0.06f);
     assert(mod != NULL);
     // assert version header preserved first
     assert(strncmp(mod, "#version", 8) == 0);
-    // assert cas injected and luma redirected
-    assert(strstr(mod, "sample_luma_cas(sColor0, vUV_y, vUVBounds_y)") != NULL);
+    // assert cas injected and luma redirected with real identifiers
+    assert(strstr(mod, "sample_luma_cas(sColor0, vUv_Y, vUvBounds_Y)") != NULL);
     free(mod);
 }

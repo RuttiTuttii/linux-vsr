@@ -263,9 +263,11 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
     if ((!dump_enabled && !dump_all) || !combined) {
         return;
     }
-    // detect video markers
-    bool has_video = strstr(combined, "ycbcr") || strstr(combined, "vUV_y")
-        || strstr(combined, "sample_yuv") || strstr(combined, "sColor0");
+    // detect video markers (broad yuv identifiers, bare sColor0 excluded as noise)
+    bool has_video = strstr(combined, "ycbcr") || strstr(combined, "Ycbcr")
+        || strstr(combined, "vUv_") || strstr(combined, "vUV_")
+        || strstr(combined, "sample_yuv") || strstr(combined, "ps_quad_yuv")
+        || strstr(combined, "Debiased") || strstr(combined, "NV12") || strstr(combined, "P010");
     // in video-only mode skip non-video shaders
     if (!dump_all && !has_video) {
         // update stats file every 50 calls so empty dumps still leave trace
@@ -282,7 +284,7 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
         return;
     }
     // cap dumps per process
-    int cap = dump_all ? 50 : 20;
+    int cap = dump_all ? 200 : 200;
     if (__atomic_fetch_add(&g_dump_count, 1, __ATOMIC_RELAXED) >= cap) {
         return;
     }

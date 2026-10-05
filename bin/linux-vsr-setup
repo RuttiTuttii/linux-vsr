@@ -58,6 +58,8 @@ detect_browsers() {
 
 # analyze collected dumps and print verdict
 analyze_dumps() {
+    # drop preload so helper tools do not load the hook and spam logs
+    unset LD_PRELOAD
     # handle missing dump dir
     if [ ! -d "${dump_dir}" ] || [ -z "$(ls -A "${dump_dir}" 2>/dev/null)" ]; then
         echo "[linux-vsr-setup] dumps not found in ${dump_dir}"
@@ -68,8 +70,8 @@ analyze_dumps() {
     # count files
     total="$(ls -1 "${dump_dir}" | wc -l)"
     echo "[linux-vsr-setup] collected dumps: ${total} in ${dump_dir}"
-    # count modern firefox/zen video shaders
-    modern="$(grep -l "vUV_y" "${dump_dir}"/* 2>/dev/null | wc -l)"
+    # count modern firefox/zen video shaders by real identifiers
+    modern="$(grep -li "vUv_\|vUV_\|ps_quad_yuv\|ycbcr\|debiased" "${dump_dir}"/* 2>/dev/null | wc -l)"
     # count legacy video shaders
     legacy="$(grep -l "sample_yuv" "${dump_dir}"/* 2>/dev/null | wc -l)"
     # count successfully patched shaders
