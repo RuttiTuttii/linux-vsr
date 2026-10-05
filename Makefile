@@ -1,20 +1,26 @@
 CC ?= gcc
-CFLAGS ?= -O3 -Wall -Wextra -fPIC -fvisibility=hidden
+CFLAGS ?= -O3 -Wall -Wextra -fPIC -Iinclude
 LDFLAGS ?= -shared -ldl
 
-PREFIX ?= /usr/local
-LIBDIR ?= $(PREFIX)/lib
-
-SRCDIR = src
 BUILDDIR = build
+SRCDIR = src
+TESTDIR = tests
 
-TARGET = libzen_vsr.so
-SOURCES = $(SRCDIR)/hook_egl.c
-OBJECTS = $(BUILDDIR)/hook_egl.o
+LIB_TARGET = libvsr.so
+TEST_TARGET = $(BUILDDIR)/test_runner
 
-.PHONY: all clean install uninstall
+SOURCES = $(wildcard $(SRCDIR)/*.c)
+OBJECTS = $(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(SOURCES))
 
-all: $(TARGET)
+TEST_SOURCES = $(wildcard $(TESTDIR)/*.c)
+TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%.o, $(TEST_SOURCES))
+
+# modules needed for tests (excluding hook and main which intercept symbols)
+CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o
+
+.PHONY: all clean test
+
+all: $(LIB_TARGET)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
@@ -22,15 +28,17 @@ $(BUILDDIR):
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TARGET): $(OBJECTS)
+$(BUILDDIR)/%.o: $(TESTDIR)/%.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(LIB_TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
+$(TEST_TARGET): $(CORE_TEST_OBJECTS) $(TEST_OBJECTS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
 clean:
-	rm -rf $(BUILDDIR) $(TARGET)
-
-install: $(TARGET)
-	install -d $(DESTDIR)$(LIBDIR)
-	install -m 755 $(TARGET) $(DESTDIR)$(LIBDIR)/
-
-uninstall:
-	rm -f $(DESTDIR)$(LIBDIR)/$(TARGET)
+	rm -rf $(BUILDDIR) $(LIB_TARGET)
