@@ -1,0 +1,15 @@
+# Compiled binaries
+*.so
+*.o
+*.a
+*.engine
+*.plan
+
+# Build directories
+build/
+bin/lib*
+
+# Temporary logs & debug dumps
+*.log
+/tmp/zen_shaders/
+.cache/
