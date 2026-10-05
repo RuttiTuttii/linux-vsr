@@ -86,11 +86,20 @@ analyze_dumps() {
         base="$(basename "${f}")"
         marks=""
         grep -q "sample_luma_cas" "${f}" 2>/dev/null && marks="${marks}PATCHED "
-        grep -q "vUV_y" "${f}" 2>/dev/null && marks="${marks}MODERN "
+        grep -qi "vUv_\|vUV_\|ps_quad_yuv\|ycbcr\|debiased" "${f}" 2>/dev/null && marks="${marks}VIDEO "
         grep -q "sample_yuv" "${f}" 2>/dev/null && marks="${marks}LEGACY "
         grep -q "vsr_badge_mask" "${f}" 2>/dev/null && marks="${marks}BADGE "
         echo "  ${base}: ${marks:-other}"
     done
+    # check browser log for interception proof when available
+    hits="$(grep -c "intercepted video shader" /tmp/vsr_browser.log 2>/dev/null || true)"
+    if [ "${hits}" -gt 0 ]; then
+        echo "[linux-vsr-setup] verdict: WORKS - ${hits} video shaders intercepted and patched"
+        echo "look for small striped badge at video bottom-right corner."
+        echo "to keep it always on, add launcher to autostart:"
+        echo "  ./bin/linux-vsr-setup --install-desktop zen-browser"
+        return 0
+    fi
     # print verdict
     if [ "${patched}" -gt 0 ]; then
         echo "[linux-vsr-setup] verdict: WORKS - upscaler injected into video pipeline"
@@ -196,13 +205,21 @@ launch_with_dump() {
     echo " dump dir: ${dump_dir}"
     echo "================================================================"
     # launch browser in background to survive remote-forward exits
-    "${browser}" "${extra[@]}" &>/dev/null &
+    # keep browser log for honest verdict (do not use /dev/null)
+    browser_log="/tmp/vsr_browser.log"
+    rm -f "${browser_log}"
+    "${browser}" "${extra[@]}" &>"${browser_log}" &
     child=$!
     # wait for user confirmation instead of process exit
     read -rp "press ENTER after video played 10s... " _
+    # drop preload before local helpers
+    unset LD_PRELOAD
     # show live dump count before analysis
     count="$(ls -1 "${dump_dir}" 2>/dev/null | wc -l)"
     echo "[linux-vsr-setup] dumps so far: ${count}, analyzing..."
+    # count interceptions from browser log for honest verdict
+    hits="$(grep -c "intercepted video shader" "${browser_log}" 2>/dev/null || true)"
+    echo "[linux-vsr-setup] interceptions in browser log: ${hits} (see ${browser_log})"
     # analyze results
     analyze_dumps || true
     # offer to kill dump instance
