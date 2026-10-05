@@ -440,6 +440,23 @@ void* dlsym(void *handle, const char *symbol) {
         vsr_hook_init();
         return (void*)glCompileShader;
     }
+    // redirect loader entry points so apps cannot bypass via real dispatch
+    if (strcmp(symbol, "eglGetProcAddress") == 0) {
+        vsr_hook_init();
+        return (void*)eglGetProcAddress;
+    }
+    if (strcmp(symbol, "eglGetProcAddressKHR") == 0) {
+        vsr_hook_init();
+        return (void*)eglGetProcAddressKHR;
+    }
+    if (strcmp(symbol, "glXGetProcAddress") == 0) {
+        vsr_hook_init();
+        return (void*)glXGetProcAddress;
+    }
+    if (strcmp(symbol, "glXGetProcAddressARB") == 0) {
+        vsr_hook_init();
+        return (void*)glXGetProcAddressARB;
+    }
     // forward all other lookups
     return real_dlsym_fn(handle, symbol);
 }
