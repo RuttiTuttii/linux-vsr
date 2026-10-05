@@ -150,7 +150,13 @@ launch_with_dump() {
     export VSR_DUMP=1
     export VSR_WATERMARK=1
     export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+    # disable firefox-family sandboxes so preload reaches gpu/content processes
     export MOZ_DISABLE_RDD_SANDBOX=1
+    export MOZ_DISABLE_CONTENT_SANDBOX=1
+    export MOZ_DISABLE_GPU_SANDBOX=1
+    export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+    export MOZ_DISABLE_GMP_SANDBOX=1
+    export MOZ_DISABLE_UTILITY_SANDBOX=1
     # build isolation args to avoid remote-forward to running instance
     extra=()
     base="$(basename "${browser}")"

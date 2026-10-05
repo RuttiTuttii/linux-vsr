@@ -100,7 +100,14 @@ cmd_status() {
 cmd_launch() {
     # configure nvidia vaapi and wayland environment
     export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+    # disable firefox-family sandboxes so LD_PRELOAD reaches gpu/content processes
+    # note: this weakens browser isolation, required for shader interposition
     export MOZ_DISABLE_RDD_SANDBOX=1
+    export MOZ_DISABLE_CONTENT_SANDBOX=1
+    export MOZ_DISABLE_GPU_SANDBOX=1
+    export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+    export MOZ_DISABLE_GMP_SANDBOX=1
+    export MOZ_DISABLE_UTILITY_SANDBOX=1
     export NVD_BACKEND="${NVD_BACKEND:-direct}"
     # configure vsr tuning options with safe defaults
     export VSR_SHARPNESS="${VSR_SHARPNESS:-0.22}"
