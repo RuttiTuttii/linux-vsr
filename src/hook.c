@@ -29,6 +29,31 @@ static PFNGLXGETPROCADDRESSPROC real_glXGetProcAddress = NULL;
 // one-time init guard for thread safety
 static pthread_once_t g_hook_once = PTHREAD_ONCE_INIT;
 
+// bypass flag for driver probe helpers (never disturb capability detection)
+static bool g_vsr_bypass = false;
+
+// detect helper processes that must see pristine gl dispatch
+static void vsr_hook_detect_bypass(void) {
+    // read own command line safely
+    FILE *fp = fopen("/proc/self/cmdline", "r");
+    // handle unreadable cmdline gracefully
+    if (!fp) {
+        return;
+    }
+    // scan first 512 bytes for probe markers
+    char buf[512] = {0};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    // handle empty cmdline
+    if (n == 0) {
+        return;
+    }
+    // skip interposition inside gl capability probes
+    if (strstr(buf, "glxtest") != NULL) {
+        g_vsr_bypass = true;
+    }
+}
+
 // cached real dlsym pointer for direct handle lookups
 static void *(*real_dlsym_fn)(void *, const char *) = NULL;
 
@@ -108,6 +133,8 @@ static void vsr_hook_maybe_reload(void) {
 
 // resolve original function pointers using dlsym
 static void vsr_hook_resolve(void) {
+    // detect probe helpers before touching dispatch
+    vsr_hook_detect_bypass();
     // resolve real lookup first to avoid recursion
     vsr_hook_resolve_dlsym();
     // fall back to direct next lookup when bootstrap failed
@@ -264,6 +291,11 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
     vsr_hook_init();
     // retry lazy libraries that loaded after first call
     vsr_hook_retry_missing();
+    // in bypass mode forward directly without inspection
+    if (g_vsr_bypass) {
+        vsr_hook_forward_source(shader, count, string, length);
+        return;
+    }
     // poll config file for runtime changes
     vsr_hook_maybe_reload();
     // handle missing original gracefully
@@ -372,6 +404,10 @@ void* eglGetProcAddress(const char *procname) {
     vsr_hook_init();
     // retry lazy libraries that loaded after first call
     vsr_hook_retry_missing();
+    // in bypass mode forward directly
+    if (g_vsr_bypass && real_eglGetProcAddress) {
+        return real_eglGetProcAddress(procname);
+    }
     // validate input string with bound
     if (procname && vsr_safe_strlen(procname, 256) < 256) {
         // redirect glShaderSource resolution
@@ -405,6 +441,10 @@ void* glXGetProcAddress(const char *procname) {
     vsr_hook_init();
     // retry lazy libraries that loaded after first call
     vsr_hook_retry_missing();
+    // in bypass mode forward directly
+    if (g_vsr_bypass && real_glXGetProcAddress) {
+        return real_glXGetProcAddress(procname);
+    }
     // validate input string with bound
     if (procname && vsr_safe_strlen(procname, 256) < 256) {
         // redirect glShaderSource resolution
@@ -459,6 +499,16 @@ void* dlsym(void *handle, const char *symbol) {
     // handle missing resolver gracefully
     if (!real_dlsym_fn) {
         return NULL;
+    }
+    // in bypass mode forward everything untouched
+    if (g_vsr_bypass) {
+        return real_dlsym_fn(handle, symbol);
+    }
+    // ensure probe detection ran before redirecting
+    vsr_hook_init();
+    // recheck bypass after detection
+    if (g_vsr_bypass) {
+        return real_dlsym_fn(handle, symbol);
     }
     // redirect shader entry points resolved via explicit handles
     if (strcmp(symbol, "glShaderSource") == 0) {
