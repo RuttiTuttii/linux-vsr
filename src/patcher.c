@@ -21,16 +21,16 @@ bool vsr_patcher_is_target_shader(const char *source) {
     if (strstr(source, "sample_luma_cas") != NULL) {
         return false;
     }
-    // skip our own marker to avoid recursion
-    if (strstr(source, "linux-vsr") != NULL && strstr(source, "sample_yuv") == NULL) {
-        return false;
-    }
-    // verify existence of sample_yuv function
-    bool has_sample_yuv = (strstr(source, "sample_yuv") != NULL);
-    // verify existence of luma texture sampling call
-    bool has_luma_sample = (strstr(source, "TEX_SAMPLE(sColor0, uv_y).r") != NULL);
-    // require both signatures
-    return has_sample_yuv && has_luma_sample;
+    // match legacy firefox format (pre-130)
+    bool legacy = (strstr(source, "sample_yuv") != NULL)
+        && (strstr(source, "TEX_SAMPLE(sColor0, uv_y).r") != NULL);
+    // match modern firefox/zen format (157+, webrender nagle)
+    bool modern = (strstr(source, "ycbcr_sample") != NULL)
+        && (strstr(source, "vUV_y") != NULL)
+        && (strstr(source, "vUVBounds_y") != NULL)
+        && (strstr(source, "sColor0") != NULL);
+    // accept either pipeline
+    return legacy || modern;
 }
 
 // replace all instances of target string inside input string
@@ -189,77 +189,237 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
     if (strstr(source, "sample_luma_cas") != NULL) {
         return NULL;
     }
-    // require injection anchor present
-    if (strstr(source, "vec4 sample_yuv(") == NULL) {
+    // detect legacy pipeline first
+    bool is_legacy = (strstr(source, "vec4 sample_yuv(") != NULL)
+        && (strstr(source, "ycbcr_sample.x = TEX_SAMPLE(sColor0, uv_y).r;") != NULL);
+    // detect modern firefox/zen pipeline
+    bool is_modern = !is_legacy
+        && (strstr(source, "ycbcr_sample") != NULL)
+        && (strstr(source, "vUV_y") != NULL)
+        && (strstr(source, "vUVBounds_y") != NULL)
+        && (strstr(source, "sColor0") != NULL);
+    // reject unknown layout
+    if (!is_legacy && !is_modern) {
         vsr_safety_set_error("inject anchor not found");
         return NULL;
     }
-    // require sampling line present
-    if (strstr(source, "ycbcr_sample.x = TEX_SAMPLE(sColor0, uv_y).r;") == NULL) {
-        vsr_safety_set_error("inject sampling line not found");
-        return NULL;
+    // handle legacy path with exact anchors
+    if (is_legacy) {
+        // detect bounds variable for watermark path
+        bool has_bounds = (strstr(source, "uv_bounds_y") != NULL);
+        // disable watermark when bounds missing to keep shader compilable
+        bool use_watermark = watermark && has_bounds;
+        // generate glsl upscaler function
+        char *upscaler_func = vsr_shader_generate_upscaler(mode, sharpness, use_watermark, opacity, size_frac);
+        // handle generation failure
+        if (!upscaler_func) {
+            return NULL;
+        }
+        // construct insertion marker string safely
+        size_t func_len = vsr_safe_strlen(upscaler_func, VSR_MAX_SHADER_SIZE);
+        const char *anchor = "vec4 sample_yuv(";
+        size_t anchor_len = strlen(anchor);
+        // compute marker length with overflow check
+        size_t marker_len = 0;
+        if (!vsr_safe_add_size(func_len, anchor_len, &marker_len) || !vsr_safe_add_size(marker_len, 1, &marker_len)) {
+            free(upscaler_func);
+            vsr_safety_set_error("inject marker size overflow");
+            return NULL;
+        }
+        // enforce marker limit
+        if (marker_len > VSR_MAX_SHADER_SIZE) {
+            free(upscaler_func);
+            vsr_safety_set_error("inject marker too large");
+            return NULL;
+        }
+        // allocate marker buffer
+        char *marker_str = (char *)vsr_safe_malloc(marker_len);
+        // handle allocation failure
+        if (!marker_str) {
+            free(upscaler_func);
+            return NULL;
+        }
+        // build marker payload
+        memcpy(marker_str, upscaler_func, func_len);
+        memcpy(marker_str + func_len, anchor, anchor_len + 1);
+        // release generator buffer
+        free(upscaler_func);
+        // inject helper function right before sample_yuv definition
+        char *with_func = vsr_patcher_replace_all(source, anchor, marker_str);
+        // release marker buffer
+        free(marker_str);
+        // handle injection failure
+        if (!with_func) {
+            return NULL;
+        }
+        // replace standard texture sampling with adaptive luma sampling
+        char *final_src = vsr_patcher_replace_all(
+            with_func,
+            "ycbcr_sample.x = TEX_SAMPLE(sColor0, uv_y).r;",
+            "ycbcr_sample.x = sample_luma_cas(sColor0, uv_y, uv_bounds_y);"
+        );
+        // release intermediate buffer
+        free(with_func);
+        // validate final output
+        if (!final_src) {
+            return NULL;
+        }
+        // enforce final size limit
+        size_t final_len = vsr_safe_strlen(final_src, VSR_MAX_OUTPUT_SIZE + 1);
+        if (final_len == 0 || final_len > VSR_MAX_OUTPUT_SIZE) {
+            free(final_src);
+            vsr_safety_set_error("inject final size invalid");
+            return NULL;
+        }
+        return final_src;
     }
-    // detect bounds variable for watermark path
-    bool has_bounds = (strstr(source, "uv_bounds_y") != NULL);
-    // disable watermark when bounds missing to keep shader compilable
-    bool use_watermark = watermark && has_bounds;
-    // generate glsl upscaler function
-    char *upscaler_func = vsr_shader_generate_upscaler(mode, sharpness, use_watermark, opacity, size_frac);
+    // handle modern path with whitespace-tolerant luma replacement
+    // generate glsl upscaler function with new bounds names
+    char *upscaler_func = vsr_shader_generate_upscaler(mode, sharpness, watermark, opacity, size_frac);
     // handle generation failure
     if (!upscaler_func) {
         return NULL;
     }
-    // construct insertion marker string safely
+    // find version header end to keep #version first
+    size_t insert_at = 0;
+    if (strncmp(source, "#version", 8) == 0) {
+        // locate end of first line
+        const char *nl = strchr(source, '\n');
+        if (nl) {
+            insert_at = (size_t)(nl - source) + 1;
+        }
+    }
+    // bound function length
     size_t func_len = vsr_safe_strlen(upscaler_func, VSR_MAX_SHADER_SIZE);
-    const char *anchor = "vec4 sample_yuv(";
-    size_t anchor_len = strlen(anchor);
-    // compute marker length with overflow check
-    size_t marker_len = 0;
-    if (!vsr_safe_add_size(func_len, anchor_len, &marker_len) || !vsr_safe_add_size(marker_len, 1, &marker_len)) {
+    // compute combined length safely
+    size_t staged_len = 0;
+    if (!vsr_safe_add_size(src_len, func_len, &staged_len) || !vsr_safe_add_size(staged_len, 1, &staged_len)) {
         free(upscaler_func);
-        vsr_safety_set_error("inject marker size overflow");
+        vsr_safety_set_error("inject staged size overflow");
         return NULL;
     }
-    // enforce marker limit
-    if (marker_len > VSR_MAX_SHADER_SIZE) {
+    // enforce staged limit
+    if (staged_len > VSR_MAX_OUTPUT_SIZE) {
         free(upscaler_func);
-        vsr_safety_set_error("inject marker too large");
+        vsr_safety_set_error("inject staged too large");
         return NULL;
     }
-    // allocate marker buffer
-    char *marker_str = (char *)vsr_safe_malloc(marker_len);
+    // allocate staged buffer with function spliced in
+    char *staged = (char *)vsr_safe_malloc(staged_len);
     // handle allocation failure
-    if (!marker_str) {
+    if (!staged) {
         free(upscaler_func);
         return NULL;
     }
-    // build marker payload
-    memcpy(marker_str, upscaler_func, func_len);
-    memcpy(marker_str + func_len, anchor, anchor_len + 1);
+    // copy head part
+    memcpy(staged, source, insert_at);
+    // copy upscaler body
+    memcpy(staged + insert_at, upscaler_func, func_len);
+    // copy tail part
+    memcpy(staged + insert_at + func_len, source + insert_at, src_len - insert_at + 1);
     // release generator buffer
     free(upscaler_func);
-    // inject helper function right before sample_yuv definition
-    char *with_func = vsr_patcher_replace_all(source, anchor, marker_str);
-    // release marker buffer
-    free(marker_str);
-    // handle injection failure
-    if (!with_func) {
+    // scan staged buffer for texture(sColor0, ...) luma fetches
+    // use dynamic output that grows only when replacements found
+    size_t staged_cur = vsr_safe_strlen(staged, VSR_MAX_OUTPUT_SIZE + 1);
+    // replacement snippet for modern pipeline
+    const char *cas_call = "sample_luma_cas(sColor0, vUV_y, vUVBounds_y)";
+    size_t cas_len = strlen(cas_call);
+    // first pass: count replacements to size output
+    size_t replaced = 0;
+    const char *scan = staged;
+    while ((scan = strstr(scan, "texture")) != NULL) {
+        // skip whitespace after keyword
+        const char *p = scan + 7;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        // require opening paren and sColor0 sampler
+        if (*p != '(') {
+            scan += 7;
+            continue;
+        }
+        p++;
+        while (*p == ' ' || *p == '\t') {
+            p++;
+        }
+        if (strncmp(p, "sColor0", 7) != 0) {
+            scan += 7;
+            continue;
+        }
+        replaced++;
+        scan = p + 7;
+        // guard runaway counts
+        if (replaced > VSR_MAX_REPLACE_COUNT) {
+            break;
+        }
+    }
+    // fallback when no luma fetch found
+    if (replaced == 0) {
+        free(staged);
+        vsr_safety_set_error("inject modern luma fetch not found");
         return NULL;
     }
-    // replace standard texture sampling with adaptive luma sampling
-    char *final_src = vsr_patcher_replace_all(
-        with_func,
-        "ycbcr_sample.x = TEX_SAMPLE(sColor0, uv_y).r;",
-        "ycbcr_sample.x = sample_luma_cas(sColor0, uv_y, uv_bounds_y);"
-    );
-    // release intermediate buffer
-    free(with_func);
-    // validate final output
+    // second pass: build output with paren-aware replacement
+    // allocate worst-case buffer (same size is enough since cas call is shorter)
+    char *final_src = (char *)vsr_safe_malloc(staged_cur + 1);
+    // handle allocation failure
     if (!final_src) {
+        free(staged);
         return NULL;
     }
-    // enforce final size limit
-    size_t final_len = vsr_safe_strlen(final_src, VSR_MAX_OUTPUT_SIZE + 1);
+    // copy with replacement loop
+    const char *src_ptr = staged;
+    char *dst_ptr = final_src;
+    while (*src_ptr) {
+        // detect texture keyword at this position
+        if (strncmp(src_ptr, "texture", 7) == 0) {
+            // probe ahead for sColor0 pattern
+            const char *p = src_ptr + 7;
+            while (*p == ' ' || *p == '\t') {
+                p++;
+            }
+            if (*p == '(') {
+                const char *q = p + 1;
+                while (*q == ' ' || *q == '\t') {
+                    q++;
+                }
+                if (strncmp(q, "sColor0", 7) == 0) {
+                    // find matching close paren with nesting
+                    const char *r = p;
+                    int depth = 0;
+                    while (*r) {
+                        if (*r == '(') {
+                            depth++;
+                        } else if (*r == ')') {
+                            depth--;
+                            if (depth == 0) {
+                                break;
+                            }
+                        }
+                        r++;
+                    }
+                    // validate paren match found
+                    if (*r == ')' && depth == 0) {
+                        // emit cas call instead of texture fetch
+                        memcpy(dst_ptr, cas_call, cas_len);
+                        dst_ptr += cas_len;
+                        // advance past original call
+                        src_ptr = r + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        // copy single byte otherwise
+        *dst_ptr++ = *src_ptr++;
+    }
+    // terminate output
+    *dst_ptr = '\0';
+    // release staged buffer
+    free(staged);
+    // validate final size
+    size_t final_len = (size_t)(dst_ptr - final_src);
     if (final_len == 0 || final_len > VSR_MAX_OUTPUT_SIZE) {
         free(final_src);
         vsr_safety_set_error("inject final size invalid");

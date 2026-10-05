@@ -10,6 +10,8 @@
 #include <string.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <time.h>
 
 // function pointer types for intercepted gl calls
@@ -119,6 +121,45 @@ static void vsr_hook_forward_source(unsigned int shader, int count, const char *
     }
 }
 
+// dump counter to avoid flooding disk
+static int g_dump_count = 0;
+
+// dump interesting shaders to /tmp for diagnosis
+static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
+    // check opt-in env once
+    static int dump_enabled = -1;
+    if (dump_enabled < 0) {
+        // read env flag
+        const char *env = getenv("VSR_DUMP");
+        dump_enabled = (env && (env[0] == '1' || env[0] == 'y' || env[0] == 't')) ? 1 : 0;
+    }
+    // skip when disabled
+    if (!dump_enabled || !combined) {
+        return;
+    }
+    // only dump shaders with video markers
+    if (!strstr(combined, "ycbcr") && !strstr(combined, "vUV_y") && !strstr(combined, "sample_yuv") && !strstr(combined, "sColor0")) {
+        return;
+    }
+    // cap dumps per process
+    if (__atomic_fetch_add(&g_dump_count, 1, __ATOMIC_RELAXED) >= 20) {
+        return;
+    }
+    // ensure dump directory exists
+    mkdir("/tmp/vsr_shaders", 0755);
+    // build dump path
+    char path[128] = {0};
+    snprintf(path, sizeof(path), "/tmp/vsr_shaders/shader_%d_%u.glsl", (int)getpid(), shader);
+    // write combined source to file
+    FILE *fp = fopen(path, "w");
+    if (fp) {
+        // write payload
+        fwrite(combined, 1, vsr_safe_strlen(combined, VSR_MAX_SHADER_SIZE), fp);
+        fclose(fp);
+        vsr_log_info("dumped video shader %u to %s", shader, path);
+    }
+}
+
 // snapshot config values safely for hook thread
 static void vsr_hook_snapshot_config(bool *enabled, char *mode, size_t mode_len, float *sharpness, bool *watermark, float *opacity, float *size_frac) {
     // validate outputs
@@ -191,6 +232,8 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
         vsr_hook_forward_source(shader, count, string, length);
         return;
     }
+    // dump video-like shaders when VSR_DUMP=1
+    vsr_hook_maybe_dump(shader, combined);
     // inspect if shader matches webrender yuv video pipeline
     if (vsr_patcher_is_target_shader(combined)) {
         // log interception with rate limit
