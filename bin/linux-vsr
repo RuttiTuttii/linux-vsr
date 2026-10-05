@@ -2,6 +2,7 @@
 # ==============================================================================
 # linux-vsr: universal video super resolution launcher for linux
 # preloads libvsr.so into browsers and video players
+# supports fresh launch and on-the-fly attach to running processes
 # ==============================================================================
 
 set -euo pipefail
@@ -10,48 +11,172 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 lib_vsr="${script_dir}/libvsr.so"
 
+# resolve default config path
+cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/linux-vsr"
+cfg_file="${VSR_CONFIG:-$cfg_dir/config.ini}"
+
 # ensure library is built
 if [ ! -f "${lib_vsr}" ]; then
     echo -e "\033[1;33m[linux-vsr]\033[0m library not found, compiling..."
     make -C "${script_dir}" -j"$(nproc)"
 fi
 
-# configure nvidia vaapi and wayland environment
-export LIBVA_DRIVER_NAME=nvidia
-export MOZ_DISABLE_RDD_SANDBOX=1
-export NVD_BACKEND=direct
-
-# configure vsr tuning options
-export VSR_SHARPNESS="${VSR_SHARPNESS:-0.22}"
-export VSR_DEBUG="${VSR_DEBUG:-1}"
-export VSR_ENABLE="${VSR_ENABLE:-1}"
-
-# attach preload library
-if [ -n "${LD_PRELOAD:-}" ]; then
-    export LD_PRELOAD="${lib_vsr}:${LD_PRELOAD}"
-else
-    export LD_PRELOAD="${lib_vsr}"
+# create default config on first run
+if [ ! -f "${cfg_file}" ]; then
+    mkdir -p "$(dirname "${cfg_file}")"
+    cat > "${cfg_file}" << 'EOF'
+# linux-vsr configuration
+enable=1
+debug=1
+sharpness=0.22
+mode=cas
+watermark=1
+watermark_opacity=0.45
+watermark_size=0.06
+# model=/path/to/model.engine
+EOF
 fi
 
-# determine target application to run
-target_bin=""
-if [ $# -gt 0 ]; then
-    target_bin="$1"
-    shift
-else
-    # default search order: zen -> firefox -> brave -> google-chrome -> chromium
-    for candidate in /opt/zen-browser-bin/zen-bin zen-browser zen firefox brave google-chrome-stable chromium; do
-        if command -v "${candidate}" &>/dev/null; then
-            target_bin="${candidate}"
-            break
-        fi
-    done
-fi
+# print usage help
+usage() {
+    cat << 'EOF'
+usage: linux-vsr [command] [args]
+  launch [app] [args...]  launch browser with vsr (default)
+  attach <pid>            inject vsr into running process via gdb
+  status                  show library and config status
+  config                  print current config file path and content
+  edit                    open config in $EDITOR
+  help                    show this help
+env overrides:
+  VSR_ENABLE, VSR_DEBUG, VSR_SHARPNESS, VSR_MODE
+  VSR_WATERMARK, VSR_WATERMARK_OPACITY, VSR_WATERMARK_SIZE
+  VSR_MODEL, VSR_CONFIG
+examples:
+  ./bin/linux-vsr
+  ./bin/linux-vsr launch firefox
+  ./bin/linux-vsr attach 12345
+  VSR_MODE=easu VSR_SHARPNESS=0.30 ./bin/linux-vsr
+EOF
+}
 
-if [ -z "${target_bin}" ]; then
-    echo -e "\033[1;31m[linux-vsr error]\033[0m no browser or media player found to launch"
-    exit 1
-fi
+# inject library into running process
+cmd_attach() {
+    # validate pid argument
+    pid="${1:-}"
+    if [ -z "${pid}" ]; then
+        echo -e "\033[1;31m[linux-vsr error]\033[0m attach requires pid" >&2
+        exit 1
+    fi
+    # check process exists
+    if [ ! -d "/proc/${pid}" ]; then
+        echo -e "\033[1;31m[linux-vsr error]\033[0m no such pid ${pid}" >&2
+        exit 1
+    fi
+    # check gdb availability
+    if ! command -v gdb &>/dev/null; then
+        echo -e "\033[1;31m[linux-vsr error]\033[0m gdb not found, install gdb for attach" >&2
+        exit 1
+    fi
+    # warn about ptrace scope
+    echo -e "\033[1;33m[linux-vsr]\033[0m injecting ${lib_vsr} into pid ${pid}..."
+    # call dlopen via gdb batch mode
+    gdb -p "${pid}" -batch \
+        -ex "call (void*)dlopen(\"${lib_vsr}\", 2)" \
+        -ex detach -ex quit 2>&1 | tail -5
+    echo -e "\033[1;32m[linux-vsr]\033[0m attach done, toggle video or resize window to recompile shaders"
+}
 
-echo -e "\033[1;32m[linux-vsr]\033[0m launching ${target_bin} with native hardware vsr..."
-exec "${target_bin}" "$@"
+# show runtime status
+cmd_status() {
+    # print library state
+    echo "library: ${lib_vsr}"
+    ls -lh "${lib_vsr}" 2>/dev/null || echo "library missing"
+    # print config state
+    echo "config: ${cfg_file}"
+    cat "${cfg_file}" 2>/dev/null || echo "config missing"
+}
+
+# launch target application with preload
+cmd_launch() {
+    # configure nvidia vaapi and wayland environment
+    export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+    export MOZ_DISABLE_RDD_SANDBOX=1
+    export NVD_BACKEND="${NVD_BACKEND:-direct}"
+    # configure vsr tuning options with safe defaults
+    export VSR_SHARPNESS="${VSR_SHARPNESS:-0.22}"
+    export VSR_DEBUG="${VSR_DEBUG:-1}"
+    export VSR_ENABLE="${VSR_ENABLE:-1}"
+    export VSR_MODE="${VSR_MODE:-cas}"
+    export VSR_WATERMARK="${VSR_WATERMARK:-1}"
+    export VSR_WATERMARK_OPACITY="${VSR_WATERMARK_OPACITY:-0.45}"
+    export VSR_WATERMARK_SIZE="${VSR_WATERMARK_SIZE:-0.06}"
+    export VSR_CONFIG="${cfg_file}"
+    # pass through optional model path
+    if [ -n "${VSR_MODEL:-}" ]; then
+        export VSR_MODEL
+    fi
+    # attach preload library
+    if [ -n "${LD_PRELOAD:-}" ]; then
+        export LD_PRELOAD="${lib_vsr}:${LD_PRELOAD}"
+    else
+        export LD_PRELOAD="${lib_vsr}"
+    fi
+    # determine target application to run
+    target_bin=""
+    if [ $# -gt 0 ]; then
+        target_bin="$1"
+        shift
+    else
+        # default search order
+        for candidate in /opt/zen-browser-bin/zen-bin zen-browser zen firefox brave google-chrome-stable chromium mpv; do
+            if command -v "${candidate}" &>/dev/null; then
+                target_bin="${candidate}"
+                break
+            fi
+        done
+    fi
+    # handle missing target
+    if [ -z "${target_bin}" ]; then
+        echo -e "\033[1;31m[linux-vsr error]\033[0m no browser or media player found to launch" >&2
+        exit 1
+    fi
+    # exec target with remaining args
+    echo -e "\033[1;32m[linux-vsr]\033[0m launching ${target_bin} with native hardware vsr..."
+    exec "${target_bin}" "$@"
+}
+
+# parse top-level command
+cmd="${1:-launch}"
+case "${cmd}" in
+    # show help text
+    help|--help|-h)
+        usage
+        ;;
+    # inject into running pid
+    attach)
+        shift || true
+        cmd_attach "$@"
+        ;;
+    # show status info
+    status)
+        cmd_status
+        ;;
+    # print config content
+    config)
+        echo "${cfg_file}"
+        cat "${cfg_file}"
+        ;;
+    # open config in editor
+    edit)
+        "${EDITOR:-nano}" "${cfg_file}"
+        ;;
+    # launch browser explicitly
+    launch)
+        shift || true
+        cmd_launch "$@"
+        ;;
+    # fallback: treat as binary name for backward compat
+    *)
+        cmd_launch "${cmd}" "$@"
+        ;;
+esac
