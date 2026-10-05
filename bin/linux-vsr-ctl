@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# linux-vsr-ctl: runtime control for vsr without browser restart
+# edits config file, hook picks changes within ~1s via hot-reload
+# note: in-texture clickable menu is not possible from glShaderSource layer
+# this cli is the supported menu for settings, profiles and models
+# ==============================================================================
+
+set -euo pipefail
+
+# resolve config locations
+cfg_dir="${XDG_CONFIG_HOME:-$HOME/.config}/linux-vsr"
+cfg_file="${VSR_CONFIG:-$cfg_dir/config.ini}"
+profiles_dir="$cfg_dir/profiles"
+
+# ensure config exists
+mkdir -p "${cfg_dir}" "${profiles_dir}"
+if [ ! -f "${cfg_file}" ]; then
+    cat > "${cfg_file}" << 'EOF'
+enable=1
+debug=1
+sharpness=0.22
+mode=cas
+watermark=1
+watermark_opacity=0.45
+watermark_size=0.06
+EOF
+fi
+
+# print usage
+usage() {
+    cat << 'EOF'
+usage: linux-vsr-ctl <command> [args]
+  status                 show current settings
+  get <key>              read single key
+  set <key> <value>      write key and hot-reload
+  mode cas|easu|off      switch upscaler
+  sharpness <0.0-0.5>    set sharpness
+  watermark on|off       toggle badge
+  opacity <0.05-1.0>    set badge opacity
+  size <0.02-0.15>       set badge size
+  model <path|off>       set tensorrt engine path or disable
+  save <profile>         save current config as profile
+  use <profile>          switch to profile
+  list                   list profiles
+  menu                   interactive menu
+EOF
+}
+
+# read key from ini file
+cfg_get() {
+    # validate key arg
+    key="${1:-}"
+    if [ -z "${key}" ]; then
+        return 1
+    fi
+    # grep last occurrence ignoring comments
+    grep -Ei "^[[:space:]]*${key}[[:space:]]*=" "${cfg_file}" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d ' \r\n' || true
+}
+
+# write key to ini file
+cfg_set() {
+    # validate args
+    key="${1:-}"
+    val="${2:-}"
+    if [ -z "${key}" ]; then
+        echo "set requires key" >&2
+        return 1
+    fi
+    # create backup before edit
+    cp "${cfg_file}" "${cfg_file}.bak"
+    # remove existing lines for key
+    grep -viE "^[[:space:]]*${key}[[:space:]]*=" "${cfg_file}" > "${cfg_file}.tmp" || true
+    # append new value
+    echo "${key}=${val}" >> "${cfg_file}.tmp"
+    # atomic replace
+    mv "${cfg_file}.tmp" "${cfg_file}"
+    # report hot-reload hint
+    echo "[linux-vsr] ${key}=${val} saved, browsers pick it up in ~1s"
+}
+
+# validate float in range using python
+valid_float() {
+    # parse args
+    val="$1"
+    lo="$2"
+    hi="$3"
+    # check with python for safety
+    python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if $lo <= v <= $hi else 1)" "${val}" 2>/dev/null
+}
+
+# show status table
+cmd_status() {
+    # print header
+    echo "config: ${cfg_file}"
+    cat "${cfg_file}"
+}
+
+# interactive menu loop
+cmd_menu() {
+    # loop until quit
+    while true; do
+        echo "--- linux-vsr menu ---"
+        echo "current: mode=$(cfg_get mode) sharp=$(cfg_get sharpness) watermark=$(cfg_get watermark)"
+        echo "1) switch mode (cas/easu/off)"
+        echo "2) set sharpness"
+        echo "3) toggle watermark"
+        echo "4) set model path"
+        echo "5) save/switch profile"
+        echo "6) status"
+        echo "0) quit"
+        read -rp "> " choice
+        # dispatch choice
+        case "${choice}" in
+            1) read -rp "mode: " m; "$0" mode "${m}" || true ;;
+            2) read -rp "sharpness 0.0-0.5: " s; "$0" sharpness "${s}" || true ;;
+            3) read -rp "watermark on/off: " w; "$0" watermark "${w}" || true ;;
+            4) read -rp "model path (or off): " p; "$0" model "${p}" || true ;;
+            5) echo "profiles:"; ls "${profiles_dir}" 2>/dev/null || echo "(none)"; read -rp "save name (empty to skip): " n; [ -n "${n}" ] && "$0" save "${n}" || true ;;
+            6) cmd_status ;;
+            0|q|quit) break ;;
+            *) echo "unknown option" ;;
+        esac
+    done
+}
+
+# parse command
+cmd="${1:-status}"
+case "${cmd}" in
+    # show help
+    help|--help|-h)
+        usage
+        ;;
+    # show full status
+    status)
+        cmd_status
+        ;;
+    # read single value
+    get)
+        cfg_get "${2:-}"
+        echo
+        ;;
+    # write single value
+    set)
+        cfg_set "${2:-}" "${3:-}"
+        ;;
+    # switch upscaler mode
+    mode)
+        m="${2:-}"
+        if [[ "${m}" != "cas" && "${m}" != "easu" && "${m}" != "off" ]]; then
+            echo "mode must be cas/easu/off" >&2
+            exit 1
+        fi
+        cfg_set "mode" "${m}"
+        ;;
+    # set sharpness
+    sharpness)
+        s="${2:-}"
+        if ! valid_float "${s}" 0.0 0.5; then
+            echo "sharpness must be 0.0-0.5" >&2
+            exit 1
+        fi
+        cfg_set "sharpness" "${s}"
+        ;;
+    # toggle watermark badge
+    watermark)
+        w="${2:-}"
+        if [[ "${w}" == "on" || "${w}" == "1" ]]; then
+            cfg_set "watermark" "1"
+        elif [[ "${w}" == "off" || "${w}" == "0" ]]; then
+            cfg_set "watermark" "0"
+        else
+            echo "watermark must be on/off" >&2
+            exit 1
+        fi
+        ;;
+    # set badge opacity
+    opacity)
+        o="${2:-}"
+        if ! valid_float "${o}" 0.05 1.0; then
+            echo "opacity must be 0.05-1.0" >&2
+            exit 1
+        fi
+        cfg_set "watermark_opacity" "${o}"
+        ;;
+    # set badge size
+    size)
+        s="${2:-}"
+        if ! valid_float "${s}" 0.02 0.15; then
+            echo "size must be 0.02-0.15" >&2
+            exit 1
+        fi
+        cfg_set "watermark_size" "${s}"
+        ;;
+    # set tensorrt model path
+    model)
+        p="${2:-}"
+        if [[ "${p}" == "off" || "${p}" == "" ]]; then
+            # remove model line to disable
+            grep -viE "^[[:space:]]*model[[:space:]]*=" "${cfg_file}" > "${cfg_file}.tmp" || true
+            mv "${cfg_file}.tmp" "${cfg_file}"
+            echo "[linux-vsr] model disabled, using glsl cas/easu path"
+        else
+            # warn when file missing but allow future path
+            if [ ! -f "${p}" ]; then
+                echo "[linux-vsr] warning: model file not found: ${p}" >&2
+            fi
+            cfg_set "model" "${p}"
+        fi
+        ;;
+    # save profile copy
+    save)
+        name="${2:-}"
+        if [ -z "${name}" ]; then
+            echo "save requires profile name" >&2
+            exit 1
+        fi
+        cp "${cfg_file}" "${profiles_dir}/${name}.ini"
+        echo "[linux-vsr] profile saved: ${name}"
+        ;;
+    # switch to profile
+    use)
+        name="${2:-}"
+        if [ ! -f "${profiles_dir}/${name}.ini" ]; then
+            echo "profile not found: ${name}" >&2
+            exit 1
+        fi
+        cp "${profiles_dir}/${name}.ini" "${cfg_file}"
+        echo "[linux-vsr] profile active: ${name}"
+        ;;
+    # list profiles
+    list)
+        ls -1 "${profiles_dir}" 2>/dev/null || echo "(no profiles)"
+        ;;
+    # interactive menu
+    menu)
+        cmd_menu
+        ;;
+    *)
+        echo "unknown command: ${cmd}" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
