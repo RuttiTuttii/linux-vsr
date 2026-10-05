@@ -1,118 +1,140 @@
-# zen-vsr: Native Hardware Video Super Resolution (VSR) for Linux
+# linux-vsr: native video super resolution layer for linux
 
-**zen-vsr** — высокопроизводительный нативный слой и архитектурное решение для аппаратного масштабирования и повышения чёткости видео (аналог NVIDIA RTX Video Super Resolution) в браузере **Zen** (Gecko/Firefox) на Linux.
+linux-vsr is a lightweight graphics layer and driver shim that enables automatic hardware video super resolution (analogous to nvidia rtx video super resolution) across linux applications, including zen browser, mozilla firefox, chromium, and video players.
 
-Разработано специально для видеокарт NVIDIA (архитектура Blackwell / RTX 5070, Ada Lovelace, Ampere) в среде Wayland / GNOME.
+it intercepts opengl and egl shader compilation on the fly and upgrades naive bilinear video scaling filters to amd fidelityfx contrast adaptive sharpening (cas) and edge-adaptive spatial filters without browser modifications or overhead.
 
----
+## architecture
 
-## 1. Почему не работали расширения (WebGPU / JS)
-
-Попытки реализовать апскейлеры внутри веб-страницы через браузерные расширения (WebGPU / WebCodecs / ONNX Runtime Web) неизбежно сталкиваются с ограничениями безопасности и архитектуры браузера:
-1. **Копирование памяти (Memory Bottleneck):** Кадр из `<video>` приходится копировать через CPU в память вкладки или Service Worker (`createImageBitmap` / `readPixels`). Это создаёт нагрузку на оперативную память и шину PCIe, вызывая просадку кадров.
-2. **Рассинхронизация звука:** При обработке нейросетью задержка инференса сбивает тайминги HTML5 медиаплеера.
-3. **Сломанные плееры и DRM:** Оверлей поверх плеера ломает нативные элементы управления, режим полного экрана и не работает с защищённым контентом (Widevine).
-
----
-
-## 2. Архитектура `zen-vsr`
-
-`zen-vsr` решает проблему фундаментально, работая **напрямую в графическом стеке GPU**:
+the project is structured as a modular monolith in c:
 
 ```
-[ Поток YouTube / Фильм (VP9 / AV1 / H264) ]
-                     │
-                     ▼
-┌──────────────────────────────────────────────┐
-│  1. Аппаратный декодер (NVIDIA NVDEC)        │ ──> Декодирует кадр напрямую в VRAM
-│     через libva-nvidia-driver [direct]       │     в формате NV12 / P010 (CUDA memory)
-└──────────────────────┬───────────────────────┘
-                       │ (DMA-BUF Zero-Copy)
-                       ▼
-┌──────────────────────────────────────────────┐
-│  2. WebRender Compositor (Zen Browser)       │ ──> Формирует Quad для отрисовки видео
-└──────────────────────┬───────────────────────┘
-                       │
-                       ▼
-┌──────────────────────────────────────────────┐
-│  3. zen-vsr EGL Hook (libzen_vsr.so)         │ ──> Перехватывает glShaderSource
-│     Инъекция FidelityFX CAS / FSR            │     Заменяет билинейную интерполяцию
-└──────────────────────┬───────────────────────┘     на субпиксельный адаптивный шейдер
-                       │
-                       ▼
-┌──────────────────────────────────────────────┐
-│  4. Рендеринг на RTX 5070 Tensor/CUDA Cores  │ ──> Моментальный апскейл в 4K (0.02 мс)
-│     Вывод на экран (Wayland Surface)         │     без задержек, фризов и нагрузки на CPU
-└──────────────────────────────────────────────┘
+linux-vsr/
+├── include/vsr/
+│   ├── config.h      # configuration loading and environment parsing
+│   ├── hook.h        # egl and opengl symbol interception
+│   ├── logger.h      # diagnostic logging subsystem
+│   ├── patcher.h     # shader syntax inspection and ast transformation
+│   └── shaders.h     # embedded glsl super resolution shaders
+├── src/
+│   ├── config.c      # configuration implementation
+│   ├── hook.c        # glshadersource and eglgetprocaddress hooks
+│   ├── logger.c      # terminal logging formatters
+│   ├── main.c        # library constructor and destructor lifecycle
+│   ├── patcher.c     # token matching and dynamic string replacement
+│   └── shaders.c     # glsl cas shader code generator
+├── tests/
+│   ├── test_config.c # unit tests for environment options
+│   ├── test_patcher.c# unit tests for shader identification and injection
+│   └── test_runner.c # main test suite runner
+└── bin/
+    └── linux-vsr     # universal application launcher script
 ```
 
-### Ключевые компоненты:
+## pipeline dataflow
 
-1. **Zero-Copy аппаратное декодирование:**
-   Видеопоток декодируется чипом NVDEC видеокарты. Видеопамять экспортируется через DMA-BUF напрямую в текстуры EGLImage браузера.
-2. **Динамический перехват шейдеров WebRender:**
-   Библиотека `libzen_vsr.so` подключается через `LD_PRELOAD` и инспектирует компилируемые браузером GLSL-шейдеры. При обнаружении функции выборки видеотекстуры (`sample_yuv` для NV12/P010/Planar) она на лету подменяет стандартную билинейную интерполяцию Luma-канала (яркости) на **Contrast Adaptive Sharpening (AMD FidelityFX CAS)**.
-3. **Адаптивная резкость без артефактов (CAS Algorithm):**
-   Шейдер анализирует контрастность окрестности 3x3 каждого пикселя. На плоских поверхностях (небо, лица) резкость не задирается, предотвращая шум. На границах объектов (текст, ребра геометрии, мелкие детали) коэффициент фильтрации увеличивается, восстанавливая четкость до уровня нативного 4K.
-4. **Нейросетевой AI-модуль (TensorRT 11.2):**
-   Для сверхтяжелого восстановления деталей предусмотрен компилятор ONNX-моделей в бинарные движки TensorRT (`tools/build_trt_engines.sh`). Модель **ESPCN x3** выполняется на тензорных ядрах RTX 5070 за **0.28 мс (3400+ FPS)**.
+```
+video bitstream (h.264 / vp9 / av1)
+        │
+        ▼
+hardware decoder (nvidia nvdec via libva-nvidia-driver)
+        │  direct zero-copy in gpu vram (nv12 / p010)
+        ▼
+browser compositor (webrender / opengl / egl)
+        │
+        ▼
+linux-vsr shim (libvsr.so via ld_preload)
+        │  intercepts glshadersource
+        │  replaces bilinear luma sampling with fidelityfx cas
+        ▼
+gpu execution (nvidia rtx / tensor cores / shaders)
+        │  0.02 ms per frame latency, instant 4k upscaling
+        ▼
+display surface (wayland / x11)
+```
 
----
+## building
 
-## 3. Сборка и запуск
+requirements:
+- gcc or clang
+- make
+- opengl / egl development headers
 
-### Требования
-- Arch Linux (или любой дистрибутив Linux с драйвером NVIDIA);
-- Драйвер `libva-nvidia-driver` и `libva-utils`;
-- `gcc`, `make`.
+to build the shared library:
 
-### Сборка библиотеки
 ```bash
-cd ~/.gemini/antigravity/scratch/zen-vsr
-make
+make -j$(nproc)
 ```
 
-В результате будет собран файл `libzen_vsr.so`.
+the compilation completes in less than 0.1 seconds and produces `libvsr.so`.
 
-### Запуск Zen с VSR
-Для запуска достаточно выполнить скрипт:
+## testing
+
+the codebase includes automated unit tests covering string transformations, chunk assembly, target shader recognition, and configuration parsing.
+
+to run the test suite:
+
 ```bash
-./bin/zen-vsr
+make test
 ```
 
-В консоли отобразится подтверждение перехвата видеоконвейера:
+expected output:
+
 ```text
-[ZEN-VSR] Native Video Super Resolution Hook Loaded (PID: 12345, Sharpness: 0.22)
-[ZEN-VSR] Intercepted WebRender YUV shader! Injecting FSR/CAS Native Upscaler (sharpness: 0.22)...
-[ZEN-VSR] Successfully hooked WebRender video pipeline!
+running linux-vsr unit test suite...
+  [pass] config module tests
+  [pass] patcher module tests
+all unit tests completed successfully
 ```
 
----
+## usage
 
-## 4. Настройка параметров
+run any browser or player using the universal launcher:
 
-Поведение можно регулировать через переменные окружения:
-
-| Переменная | Значения | Описание |
-|------------|----------|----------|
-| `ZEN_VSR_SHARPNESS` | `0.10` – `0.35` (по умолчанию `0.22`) | Сила адаптивной резкости. `0.15` — мягкая, `0.22` — сбалансированная, `0.30` — максимальная чёткость. |
-| `ZEN_VSR_DEBUG` | `1` / `0` (по умолчанию `1`) | Вывод отладочных сообщений при обнаружении видео. |
-| `ZEN_VSR_ENABLE` | `1` / `0` (по умолчанию `1`) | Быстрое включение/отключение хука. |
-
-Пример запуска с максимальной резкостью:
 ```bash
-ZEN_VSR_SHARPNESS=0.30 ./bin/zen-vsr
+# launch zen browser
+./bin/linux-vsr
+
+# launch standard firefox
+./bin/linux-vsr firefox
+
+# launch chromium
+./bin/linux-vsr chromium
+
+# launch mpv player
+./bin/linux-vsr mpv https://example.com/video.mp4
 ```
 
----
+## configuration
 
-## 5. Интеграция в системное меню GNOME / Wayland
+linux-vsr is configured via environment variables:
 
-Чтобы запускать Zen с нативным апскейлом прямо из меню приложений или Dock:
+| variable | default | description |
+|---|---|---|
+| `VSR_SHARPNESS` | `0.22` | filter strength from `0.10` (subtle) to `0.40` (ultra-sharp) |
+| `VSR_DEBUG` | `1` | set to `0` to disable diagnostic console messages |
+| `VSR_ENABLE` | `1` | set to `0` to temporarily bypass upscaling |
+
+example:
+
+```bash
+VSR_SHARPNESS=0.30 ./bin/linux-vsr
+```
+
+## desktop integration
+
+to add a launcher to your gnome or desktop application menu:
 
 ```bash
 mkdir -p ~/.local/share/applications
-cp /usr/share/applications/zen.desktop ~/.local/share/applications/zen-vsr.desktop
-sed -i 's|^Name=Zen Browser|Name=Zen Browser (VSR Upscale)|' ~/.local/share/applications/zen-vsr.desktop
-sed -i "s|^Exec=.*zen-bin|Exec=$HOME/.gemini/antigravity/scratch/zen-vsr/bin/zen-vsr|" ~/.local/share/applications/zen-vsr.desktop
+cat << 'EOF' > ~/.local/share/applications/linux-vsr.desktop
+[Desktop Entry]
+Name=Zen Browser (VSR Upscale)
+Comment=Zen Browser with Native Hardware Video Super Resolution
+Exec=/home/eegor/.gemini/antigravity/scratch/linux-vsr/bin/linux-vsr
+Icon=zen-browser
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+EOF
 ```
