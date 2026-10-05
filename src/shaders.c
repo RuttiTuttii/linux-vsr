@@ -17,8 +17,18 @@ static int vsr_shader_append_watermark(char *buf, size_t buf_len, size_t offset,
     opacity = vsr_safe_clamp_float(opacity, 0.05f, 1.0f);
     size_frac = vsr_safe_clamp_float(size_frac, 0.02f, 0.15f);
     // format badge helper with baked constants
+    // note: badge drawn in both top-right and bottom-right corners
+    // to stay visible regardless of texture v orientation
     int written = snprintf(buf + offset, buf_len - offset,
         "\n// === linux-vsr: corner badge (upscale indicator) ===\n"
+        "float vsr_badge_rect(vec2 rel, vec2 lo, vec2 hi) {\n"
+        "    if (rel.x < lo.x || rel.x > hi.x || rel.y < lo.y || rel.y > hi.y) { return 0.0; }\n"
+        "    vec2 f = (rel - lo) / max(hi - lo, vec2(1e-6));\n"
+        "    float bar = step(f.x, 0.22) + step(abs(f.x - 0.5), 0.11) + step(0.78, f.x);\n"
+        "    bar = clamp(bar, 0.0, 1.0);\n"
+        "    float edge = step(0.06, f.x) * step(f.x, 0.94) * step(0.12, f.y) * step(f.y, 0.88);\n"
+        "    return clamp(bar * edge + 0.25 * (1.0 - edge), 0.0, 1.0);\n"
+        "}\n"
         "float vsr_badge_mask(vec2 uv, vec4 bounds) {\n"
         "    vec2 ext = bounds.zw - bounds.xy;\n"
         "    ext = max(ext, vec2(1e-6));\n"
@@ -26,14 +36,9 @@ static int vsr_shader_append_watermark(char *buf, size_t buf_len, size_t offset,
         "    float margin = 0.015;\n"
         "    float bw = %.4ff;\n"
         "    float bh = %.4ff * 0.32;\n"
-        "    vec2 lo = vec2(1.0 - margin - bw, 1.0 - margin - bh);\n"
-        "    vec2 hi = vec2(1.0 - margin, 1.0 - margin);\n"
-        "    if (rel.x < lo.x || rel.x > hi.x || rel.y < lo.y || rel.y > hi.y) { return 0.0; }\n"
-        "    vec2 f = (rel - lo) / max(vec2(bw, bh), vec2(1e-6));\n"
-        "    float bar = step(f.x, 0.22) + step(abs(f.x - 0.5), 0.11) + step(0.78, f.x);\n"
-        "    bar = clamp(bar, 0.0, 1.0);\n"
-        "    float edge = step(0.06, f.x) * step(f.x, 0.94) * step(0.12, f.y) * step(f.y, 0.88);\n"
-        "    return clamp(bar * edge + 0.25 * (1.0 - edge), 0.0, 1.0);\n"
+        "    float top = vsr_badge_rect(rel, vec2(1.0 - margin - bw, 1.0 - margin - bh), vec2(1.0 - margin, 1.0 - margin));\n"
+        "    float bot = vsr_badge_rect(rel, vec2(1.0 - margin - bw, margin), vec2(1.0 - margin, margin + bh));\n"
+        "    return clamp(top + bot, 0.0, 1.0);\n"
         "}\n"
         "float vsr_apply_badge(float luma, vec2 uv, vec4 bounds) {\n"
         "    float m = vsr_badge_mask(uv, bounds);\n"
