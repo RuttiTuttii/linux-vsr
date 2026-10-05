@@ -121,28 +121,50 @@ static void vsr_hook_forward_source(unsigned int shader, int count, const char *
     }
 }
 
-// dump counter to avoid flooding disk
+// dump counters to avoid flooding disk
 static int g_dump_count = 0;
+static long g_shader_total = 0;
 
 // dump interesting shaders to /tmp for diagnosis
 static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
     // check opt-in env once
     static int dump_enabled = -1;
+    static int dump_all = -1;
     if (dump_enabled < 0) {
         // read env flag
         const char *env = getenv("VSR_DUMP");
         dump_enabled = (env && (env[0] == '1' || env[0] == 'y' || env[0] == 't')) ? 1 : 0;
+        // read full dump flag
+        const char *env_all = getenv("VSR_DUMP_ALL");
+        dump_all = (env_all && (env_all[0] == '1' || env_all[0] == 'y' || env_all[0] == 't')) ? 1 : 0;
     }
-    // skip when disabled
-    if (!dump_enabled || !combined) {
+    // count every intercepted call for stats
+    long total = __atomic_add_fetch(&g_shader_total, 1, __ATOMIC_RELAXED);
+    // skip file work when disabled
+    if ((!dump_enabled && !dump_all) || !combined) {
         return;
     }
-    // only dump shaders with video markers
-    if (!strstr(combined, "ycbcr") && !strstr(combined, "vUV_y") && !strstr(combined, "sample_yuv") && !strstr(combined, "sColor0")) {
+    // detect video markers
+    bool has_video = strstr(combined, "ycbcr") || strstr(combined, "vUV_y")
+        || strstr(combined, "sample_yuv") || strstr(combined, "sColor0");
+    // in video-only mode skip non-video shaders
+    if (!dump_all && !has_video) {
+        // update stats file every 50 calls so empty dumps still leave trace
+        if ((total % 50) == 0) {
+            mkdir("/tmp/vsr_shaders", 0755);
+            char spath[128] = {0};
+            snprintf(spath, sizeof(spath), "/tmp/vsr_shaders/stats_%d.log", (int)getpid());
+            FILE *sfp = fopen(spath, "w");
+            if (sfp) {
+                fprintf(sfp, "pid=%d total=%ld video=0 note=no-video-markers-yet\n", (int)getpid(), total);
+                fclose(sfp);
+            }
+        }
         return;
     }
     // cap dumps per process
-    if (__atomic_fetch_add(&g_dump_count, 1, __ATOMIC_RELAXED) >= 20) {
+    int cap = dump_all ? 50 : 20;
+    if (__atomic_fetch_add(&g_dump_count, 1, __ATOMIC_RELAXED) >= cap) {
         return;
     }
     // ensure dump directory exists
@@ -156,7 +178,15 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
         // write payload
         fwrite(combined, 1, vsr_safe_strlen(combined, VSR_MAX_SHADER_SIZE), fp);
         fclose(fp);
-        vsr_log_info("dumped video shader %u to %s", shader, path);
+        vsr_log_info("dumped shader %u to %s (total=%ld video=%d)", shader, path, total, has_video ? 1 : 0);
+    }
+    // update stats file
+    char spath[128] = {0};
+    snprintf(spath, sizeof(spath), "/tmp/vsr_shaders/stats_%d.log", (int)getpid());
+    FILE *sfp = fopen(spath, "w");
+    if (sfp) {
+        fprintf(sfp, "pid=%d total=%ld dumped=%d\n", (int)getpid(), total, g_dump_count);
+        fclose(sfp);
     }
 }
 
