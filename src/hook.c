@@ -29,19 +29,19 @@ static PFNGLXGETPROCADDRESSPROC real_glXGetProcAddress = NULL;
 // one-time init guard for thread safety
 static pthread_once_t g_hook_once = PTHREAD_ONCE_INIT;
 
-// declare glibc internal lookup to avoid recursion in dlsym hook
-extern void *__libc_dlsym(void *map, const char *name);
-
-// cached real dlsym pointer resolved via libc internal
+// cached real dlsym pointer for direct handle lookups
 static void *(*real_dlsym_fn)(void *, const char *) = NULL;
-static void *(*real_dlvsym_fn)(void *, const char *, const char *) = NULL;
 
-// resolve real dlsym/dlvsym without recursion
+// resolve real dlsym via versioned lookup (dlvsym itself is not hooked)
 static void vsr_hook_resolve_dlsym(void) {
-    // use libc internal to bypass own interposition
-    real_dlsym_fn = (void *(*)(void *, const char *))__libc_dlsym((void *)-1, "dlsym");
-    // resolve dlvsym variant when available
-    real_dlvsym_fn = (void *(*)(void *, const char *, const char *))__libc_dlsym((void *)-1, "dlvsym");
+    // use raw dlvsym to bypass our own dlsym interposition
+    if (!real_dlsym_fn) {
+        real_dlsym_fn = (void *(*)(void *, const char *))dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5");
+    }
+    // fallback to unversioned next lookup when versioned fails
+    if (!real_dlsym_fn) {
+        real_dlsym_fn = (void *(*)(void *, const char *))dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34");
+    }
 }
 
 // cached config file state for hot reload
@@ -108,22 +108,20 @@ static void vsr_hook_maybe_reload(void) {
 
 // resolve original function pointers using dlsym
 static void vsr_hook_resolve(void) {
-    // resolve libc lookup first to avoid recursion
+    // resolve real lookup first to avoid recursion
     vsr_hook_resolve_dlsym();
-    // use libc internal directly, our own dlsym hook is active now
-    void *(*libc_lookup)(void *, const char *) = real_dlsym_fn
-        ? real_dlsym_fn
-        : (void *(*)(void *, const char *))__libc_dlsym((void *)-1, "dlsym");
+    // fall back to direct next lookup when bootstrap failed
+    void *(*lookup)(void *, const char *) = real_dlsym_fn;
     // clear errors before resolving
     dlerror();
     // resolve base glShaderSource symbol
-    real_glShaderSource = (PFNGLSHADERSOURCEPROC)libc_lookup(RTLD_NEXT, "glShaderSource");
+    real_glShaderSource = (PFNGLSHADERSOURCEPROC)lookup(RTLD_NEXT, "glShaderSource");
     // resolve compile symbol
-    real_glCompileShader = (PFNGLCOMPILESHADERPROC)libc_lookup(RTLD_NEXT, "glCompileShader");
+    real_glCompileShader = (PFNGLCOMPILESHADERPROC)lookup(RTLD_NEXT, "glCompileShader");
     // resolve egl lookup symbol
-    real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)libc_lookup(RTLD_NEXT, "eglGetProcAddress");
+    real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)lookup(RTLD_NEXT, "eglGetProcAddress");
     // resolve glx lookup symbol for x11 paths
-    real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)libc_lookup(RTLD_NEXT, "glXGetProcAddress");
+    real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)lookup(RTLD_NEXT, "glXGetProcAddress");
     // ignore dlerror here, null pointers are handled per call
 }
 
@@ -417,9 +415,13 @@ void* eglGetProcAddressKHR(const char *procname) {
 // intercepted dlsym to catch direct libGL handle lookups
 __attribute__((visibility("default")))
 void* dlsym(void *handle, const char *symbol) {
-    // lazily resolve real lookup without recursion
+    // lazily resolve real lookup via unhooked versioned symbol
     if (!real_dlsym_fn) {
-        real_dlsym_fn = (void *(*)(void *, const char *))__libc_dlsym((void *)-1, "dlsym");
+        real_dlsym_fn = (void *(*)(void *, const char *))dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5");
+    }
+    // fallback to newer version tag
+    if (!real_dlsym_fn) {
+        real_dlsym_fn = (void *(*)(void *, const char *))dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.34");
     }
     // handle missing resolver gracefully
     if (!real_dlsym_fn) {
@@ -440,28 +442,4 @@ void* dlsym(void *handle, const char *symbol) {
     }
     // forward all other lookups
     return real_dlsym_fn(handle, symbol);
-}
-
-// intercepted dlvsym variant for versioned lookups
-__attribute__((visibility("default")))
-void* dlvsym(void *handle, const char *symbol, const char *version) {
-    // lazily resolve real lookup without recursion
-    if (!real_dlvsym_fn) {
-        real_dlvsym_fn = (void *(*)(void *, const char *, const char *))__libc_dlsym((void *)-1, "dlvsym");
-    }
-    // handle missing resolver gracefully
-    if (!real_dlvsym_fn) {
-        return NULL;
-    }
-    // redirect versioned shader lookups as well
-    if (strcmp(symbol, "glShaderSource") == 0) {
-        vsr_hook_init();
-        return (void*)glShaderSource;
-    }
-    if (strcmp(symbol, "glShaderSourceARB") == 0) {
-        vsr_hook_init();
-        return (void*)glShaderSourceARB;
-    }
-    // forward all other lookups
-    return real_dlvsym_fn(handle, symbol, version);
 }
