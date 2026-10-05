@@ -20,12 +20,12 @@ static void vsr_init(void) {
     vsr_config_load(cfg);
     // initialize logger subsystem
     vsr_log_init(cfg->debug);
-    // log activation notice with mode details
+    // log activation notice with mode details and build stamp
     if (cfg->enabled) {
-        vsr_log_debug("native video super resolution loaded (pid: %d, mode: %s, sharpness: %.2f, watermark: %d)",
-            (int)getpid(), cfg->mode, (double)cfg->sharpness, cfg->watermark_enabled ? 1 : 0);
+        vsr_log_debug("native video super resolution loaded (pid: %d, mode: %s, sharpness: %.2f, watermark: %d, build: %s %s)",
+            (int)getpid(), cfg->mode, (double)cfg->sharpness, cfg->watermark_enabled ? 1 : 0, __DATE__, __TIME__);
     } else {
-        vsr_log_debug("vsr preloaded but disabled (pid: %d)", (int)getpid());
+        vsr_log_debug("vsr preloaded but disabled (pid: %d, build: %s %s)", (int)getpid(), __DATE__, __TIME__);
     }
     // pre-bind function hooks
     vsr_hook_init();
