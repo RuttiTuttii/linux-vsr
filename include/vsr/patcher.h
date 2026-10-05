@@ -13,6 +13,9 @@ char* vsr_patcher_replace_all(const char *orig, const char *target, const char *
 // transform webrender shader by injecting cas upscaling function
 char* vsr_patcher_inject_upscaler(const char *source, float sharpness);
 
+// transform shader with full mode and watermark control
+char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, float sharpness, bool watermark, float opacity, float size_frac);
+
 // merge glshadersource input chunks into a single null-terminated string
 char* vsr_patcher_combine_chunks(int count, const char *const *string, const int *length, size_t *out_len);
 
