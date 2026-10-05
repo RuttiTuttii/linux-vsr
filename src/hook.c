@@ -433,8 +433,10 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
                 // record hit to file for redirection-proof verdict
                 FILE *hit_fp = fopen("/tmp/vsr_hits.log", "a");
                 if (hit_fp) {
-                    fprintf(hit_fp, "pid=%d shader=%u mode=%s sharp=%.2f wm=%d %zu->%zu\n",
-                        (int)getpid(), shader, mode, (double)sharpness,
+                    // format sharpness as integer hundredths to avoid locale decimals
+                    int sharp100 = (int)(sharpness * 100.0f + 0.5f);
+                    fprintf(hit_fp, "pid=%d shader=%u mode=%s sharp100=%d wm=%d %zu->%zu\n",
+                        (int)getpid(), shader, mode, sharp100,
                         watermark ? 1 : 0, total_len, patched_len);
                     fclose(hit_fp);
                 }

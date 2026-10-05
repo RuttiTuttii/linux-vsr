@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <locale.h>
 
 // unit test for basic cas generation
 void test_shaders_cas_basic(void) {
@@ -56,6 +57,36 @@ void test_shaders_easu(void) {
     assert(plain != NULL);
     assert(strstr(plain, "vsr_badge_mask") == NULL);
     free(plain);
+}
+
+// unit test for locale-independent decimal dots in generated glsl
+void test_shaders_locale_dots(void) {
+    // try switching to comma-decimal locale when available
+    const char *prev = setlocale(LC_NUMERIC, NULL);
+    char prev_copy[64] = {0};
+    if (prev) {
+        strncpy(prev_copy, prev, sizeof(prev_copy) - 1);
+    }
+    // attempt ru locale, skip strict checks when missing
+    bool comma_locale = (setlocale(LC_NUMERIC, "ru_RU.utf8") != NULL);
+    // generate cas with watermark under current locale
+    char *s = vsr_shader_generate_cas_full(0.22f, true, 0.45f, 0.06f);
+    assert(s != NULL);
+    // verify sharpness baked with dot decimal
+    assert(strstr(s, "0.2200f") != NULL);
+    // verify no comma decimals leaked into code
+    assert(strstr(s, "0,22") == NULL);
+    assert(strstr(s, "0,45") == NULL);
+    assert(strstr(s, "0,06") == NULL);
+    free(s);
+    // restore previous locale
+    if (prev_copy[0] != '\0') {
+        setlocale(LC_NUMERIC, prev_copy);
+    } else {
+        setlocale(LC_NUMERIC, "C");
+    }
+    // silence unused warning when locale missing
+    (void)comma_locale;
 }
 
 // unit test for mode dispatch

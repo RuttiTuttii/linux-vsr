@@ -22,6 +22,7 @@ void test_shaders_cas_basic(void);
 void test_shaders_cas_watermark(void);
 void test_shaders_easu(void);
 void test_shaders_dispatch(void);
+void test_shaders_locale_dots(void);
 
 int main(void) {
     // announce test suite start
@@ -54,6 +55,7 @@ int main(void) {
     test_shaders_cas_watermark();
     test_shaders_easu();
     test_shaders_dispatch();
+    test_shaders_locale_dots();
     printf("  [pass] shaders module tests\n");
     // report success
     printf("all unit tests completed successfully\n");

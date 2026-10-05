@@ -3,9 +3,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <locale.h>
 
 // internal buffer size for generated code
 #define VSR_SHADER_BUF 8192
+
+// pin thread numeric locale to c for dot decimals in generated glsl
+static locale_t vsr_locale_push_c(locale_t *saved_out) {
+    // create c numeric locale, always available
+    locale_t created = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    // handle creation failure gracefully
+    if (created == (locale_t)0) {
+        *saved_out = (locale_t)0;
+        return (locale_t)0;
+    }
+    // switch thread locale and remember previous
+    *saved_out = uselocale(created);
+    return created;
+}
+
+// restore previous locale and release c locale handle
+static void vsr_locale_pop(locale_t saved, locale_t created) {
+    // nothing to do when creation failed
+    if (created == (locale_t)0) {
+        return;
+    }
+    // restore previous thread locale
+    uselocale(saved);
+    // release created handle
+    freelocale(created);
+}
 
 // build watermark glsl snippet into buffer
 static int vsr_shader_append_watermark(char *buf, size_t buf_len, size_t offset, float opacity, float size_frac) {
@@ -75,6 +102,9 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
     if (!buffer) {
         return NULL;
     }
+    // pin numeric locale so decimals always use dots
+    locale_t saved_locale = (locale_t)0;
+    locale_t c_locale = vsr_locale_push_c(&saved_locale);
     // track write offset for ordered emission
     size_t off = 0;
     // emit badge helpers first so cas body can call them (no nested functions)
@@ -82,6 +112,7 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
         int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, off, opacity, size_frac);
         // handle generation failure
         if (wm < 0) {
+            vsr_locale_pop(saved_locale, c_locale);
             free(buffer);
             return NULL;
         }
@@ -115,6 +146,7 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
         (double)sharpness);
     // validate snprintf result
     if (written <= 0 || (size_t)written >= VSR_SHADER_BUF - off) {
+        vsr_locale_pop(saved_locale, c_locale);
         free(buffer);
         vsr_safety_set_error("cas snippet truncated");
         return NULL;
@@ -129,6 +161,7 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
         if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
+            vsr_locale_pop(saved_locale, c_locale);
             free(buffer);
             vsr_safety_set_error("cas tail truncated");
             return NULL;
@@ -140,11 +173,14 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
         if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
+            vsr_locale_pop(saved_locale, c_locale);
             free(buffer);
             vsr_safety_set_error("cas tail truncated");
             return NULL;
         }
     }
+    // restore thread locale before returning
+    vsr_locale_pop(saved_locale, c_locale);
     return buffer;
 }
 
@@ -159,6 +195,9 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
     if (!buffer) {
         return NULL;
     }
+    // pin numeric locale so decimals always use dots
+    locale_t saved_locale = (locale_t)0;
+    locale_t c_locale = vsr_locale_push_c(&saved_locale);
     // track write offset for ordered emission
     size_t off = 0;
     // emit badge helpers first so easu body can call them (no nested functions)
@@ -166,6 +205,7 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
         int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, off, opacity, size_frac);
         // handle generation failure
         if (wm < 0) {
+            vsr_locale_pop(saved_locale, c_locale);
             free(buffer);
             return NULL;
         }
@@ -190,6 +230,7 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
         "    res = clamp(res, 0.0, 1.0);\n");
     // validate snprintf result
     if (written <= 0 || (size_t)written >= VSR_SHADER_BUF - off) {
+        vsr_locale_pop(saved_locale, c_locale);
         free(buffer);
         vsr_safety_set_error("easu snippet truncated");
         return NULL;
@@ -204,6 +245,7 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
         if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
+            vsr_locale_pop(saved_locale, c_locale);
             free(buffer);
             vsr_safety_set_error("easu tail truncated");
             return NULL;
@@ -215,11 +257,14 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
         if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
+            vsr_locale_pop(saved_locale, c_locale);
             free(buffer);
             vsr_safety_set_error("easu tail truncated");
             return NULL;
         }
     }
+    // restore thread locale before returning
+    vsr_locale_pop(saved_locale, c_locale);
     return buffer;
 }
 

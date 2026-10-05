@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <locale.h>
 
 // global configuration singleton
 static vsr_config_t g_config;
@@ -316,6 +317,12 @@ bool vsr_config_save(const vsr_config_t *cfg, const char *path) {
         vsr_safety_set_error("cannot open config for writing");
         return false;
     }
+    // pin numeric locale so saved decimals always use dots
+    locale_t c_locale = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    locale_t saved_locale = (locale_t)0;
+    if (c_locale != (locale_t)0) {
+        saved_locale = uselocale(c_locale);
+    }
     // write header comment
     fprintf(fp, "# linux-vsr configuration (generated)\n");
     // write core toggles
@@ -331,6 +338,11 @@ bool vsr_config_save(const vsr_config_t *cfg, const char *path) {
     // write optional model path
     if (cfg->model_path[0] != '\0') {
         fprintf(fp, "model=%s\n", cfg->model_path);
+    }
+    // restore thread locale before closing
+    if (c_locale != (locale_t)0) {
+        uselocale(saved_locale);
+        freelocale(c_locale);
     }
     // close file handle
     fclose(fp);
