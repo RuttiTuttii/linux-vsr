@@ -220,8 +220,15 @@ static void vsr_hook_retry_missing(void) {
 
 // initialize original function pointers using dlsym
 void vsr_hook_init(void) {
+    // guard against reentrant init via dlopen constructors in the same thread
+    static __thread int in_init = 0;
+    if (in_init) {
+        return;
+    }
+    in_init = 1;
     // run resolver exactly once across threads
     pthread_once(&g_hook_once, vsr_hook_resolve);
+    in_init = 0;
 }
 
 // forward original shader source without modification
@@ -545,40 +552,37 @@ void* dlsym(void *handle, const char *symbol) {
     if (g_vsr_bypass) {
         return real_dlsym_fn(handle, symbol);
     }
-    // ensure probe detection ran before redirecting
-    vsr_hook_init();
+    // ensure probe detection ran (no once here to avoid loader deadlock)
+    static int bypass_decided = 0;
+    if (!bypass_decided) {
+        vsr_hook_detect_bypass();
+        bypass_decided = 1;
+    }
     // recheck bypass after detection
     if (g_vsr_bypass) {
         return real_dlsym_fn(handle, symbol);
     }
     // redirect shader entry points resolved via explicit handles
     if (strcmp(symbol, "glShaderSource") == 0) {
-        vsr_hook_init();
         return (void*)glShaderSource;
     }
     if (strcmp(symbol, "glShaderSourceARB") == 0) {
-        vsr_hook_init();
         return (void*)glShaderSourceARB;
     }
     if (strcmp(symbol, "glCompileShader") == 0) {
-        vsr_hook_init();
         return (void*)glCompileShader;
     }
     // redirect loader entry points so apps cannot bypass via real dispatch
     if (strcmp(symbol, "eglGetProcAddress") == 0) {
-        vsr_hook_init();
         return (void*)eglGetProcAddress;
     }
     if (strcmp(symbol, "eglGetProcAddressKHR") == 0) {
-        vsr_hook_init();
         return (void*)eglGetProcAddressKHR;
     }
     if (strcmp(symbol, "glXGetProcAddress") == 0) {
-        vsr_hook_init();
         return (void*)glXGetProcAddress;
     }
     if (strcmp(symbol, "glXGetProcAddressARB") == 0) {
-        vsr_hook_init();
         return (void*)glXGetProcAddressARB;
     }
     // forward all other lookups
