@@ -144,6 +144,12 @@ launch_with_dump() {
     # clean previous dumps
     rm -rf "${dump_dir}"
     mkdir -p "${dump_dir}"
+    # warn when main instance already running (before preload export)
+    base="$(basename "${browser}")"
+    if command -v pgrep &>/dev/null && pgrep -f "${base}" &>/dev/null; then
+        echo "[linux-vsr-setup] note: ${base} already running,"
+        echo "using isolated profile so dump instance does not forward to it."
+    fi
     # export preload and debug env
     export LD_PRELOAD="${lib_vsr}${LD_PRELOAD:+:${LD_PRELOAD}}"
     export VSR_DEBUG=1
@@ -166,9 +172,9 @@ launch_with_dump() {
     if [[ "${base}" == *zen* || "${base}" == *firefox* ]]; then
         # force fresh firefox-family instance with temp profile
         prof="/tmp/vsr-dump-profile"
-        # remove stale profile so previous kills do not trigger safe-mode dialog
+        # remove stale profile, but do not pre-create it:
+        # an empty dir triggers profile missing dialog, browser must init it
         rm -rf "${prof}"
-        mkdir -p "${prof}"
         extra=(--new-instance --profile "${prof}" "$@")
     elif [[ "${base}" == *chrom* || "${base}" == *brave* ]]; then
         # force fresh chromium-family instance with temp data dir
@@ -177,11 +183,6 @@ launch_with_dump() {
         extra=(--user-data-dir="${prof}" --no-first-run "$@")
     else
         extra=("$@")
-    fi
-    # warn when main instance already running
-    if pgrep -f "${base}" &>/dev/null; then
-        echo "[linux-vsr-setup] note: ${base} already running,"
-        echo "using isolated profile so dump instance does not forward to it."
     fi
     # print instructions
     echo "================================================================"
