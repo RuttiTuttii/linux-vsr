@@ -5,6 +5,7 @@
 #include "vsr/patcher.h"
 #include "vsr/safety.h"
 #include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
@@ -138,8 +139,7 @@ static void vsr_hook_snapshot_config(bool *enabled, char *mode, size_t mode_len,
     *opacity = vsr_safe_clamp_float(cfg->watermark_opacity, 0.05f, 1.0f);
     *size_frac = vsr_safe_clamp_float(cfg->watermark_size, 0.02f, 0.15f);
     // copy mode string safely
-    strncpy(mode, cfg->mode, mode_len - 1);
-    mode[mode_len - 1] = '\0';
+    snprintf(mode, mode_len, "%s", cfg->mode);
 }
 
 // intercepted glShaderSource function

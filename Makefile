@@ -1,6 +1,6 @@
 CC ?= gcc
-CFLAGS ?= -O3 -Wall -Wextra -fPIC -Iinclude
-LDFLAGS ?= -shared -ldl
+CFLAGS ?= -O2 -Wall -Wextra -Werror -fPIC -Iinclude -pthread -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fvisibility=hidden
+LDFLAGS ?= -shared -ldl -pthread
 
 BUILDDIR = build
 SRCDIR = src
@@ -16,7 +16,7 @@ TEST_SOURCES = $(wildcard $(TESTDIR)/*.c)
 TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%.o, $(TEST_SOURCES))
 
 # modules needed for tests (excluding hook and main which intercept symbols)
-CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o
+CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o $(BUILDDIR)/safety.o
 
 .PHONY: all clean test
 
