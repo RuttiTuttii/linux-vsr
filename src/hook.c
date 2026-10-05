@@ -131,6 +131,24 @@ static void vsr_hook_maybe_reload(void) {
     }
 }
 
+// cached explicit handles for system gl libraries
+static void *g_egl_handle = NULL;
+static void *g_gl_handle = NULL;
+
+// force-load system gl libraries so late lookups always have a target
+static void vsr_hook_force_gl_libs(void) {
+    // dlopen is not hooked, safe to call here
+    if (!g_egl_handle) {
+        g_egl_handle = dlopen("libEGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_gl_handle) {
+        g_gl_handle = dlopen("libGL.so.1", RTLD_NOW | RTLD_GLOBAL);
+    }
+    if (!g_gl_handle) {
+        g_gl_handle = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
+    }
+}
+
 // resolve original function pointers using dlsym
 static void vsr_hook_resolve(void) {
     // detect probe helpers before touching dispatch
@@ -143,6 +161,8 @@ static void vsr_hook_resolve(void) {
     if (!lookup) {
         return;
     }
+    // ensure system libraries are present for next-order search
+    vsr_hook_force_gl_libs();
     // clear errors before resolving
     dlerror();
     // resolve base glShaderSource symbol
@@ -153,6 +173,16 @@ static void vsr_hook_resolve(void) {
     real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)lookup(RTLD_NEXT, "eglGetProcAddress");
     // resolve glx lookup symbol for x11 paths
     real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)lookup(RTLD_NEXT, "glXGetProcAddress");
+    // fall back to explicit handles when next-order search missed
+    if (!real_eglGetProcAddress && g_egl_handle) {
+        real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)lookup(g_egl_handle, "eglGetProcAddress");
+    }
+    if (!real_glShaderSource && g_gl_handle) {
+        real_glShaderSource = (PFNGLSHADERSOURCEPROC)lookup(g_gl_handle, "glShaderSource");
+    }
+    if (!real_glCompileShader && g_gl_handle) {
+        real_glCompileShader = (PFNGLCOMPILESHADERPROC)lookup(g_gl_handle, "glCompileShader");
+    }
     // ignore dlerror here, null pointers are handled per call
 }
 
@@ -162,15 +192,26 @@ static void vsr_hook_retry_missing(void) {
     if (!real_dlsym_fn) {
         return;
     }
+    // ensure system libraries are present before retrying
+    vsr_hook_force_gl_libs();
     // retry each missing entry, racy writes are idempotent
     if (!real_glShaderSource) {
         real_glShaderSource = (PFNGLSHADERSOURCEPROC)real_dlsym_fn(RTLD_NEXT, "glShaderSource");
+        if (!real_glShaderSource && g_gl_handle) {
+            real_glShaderSource = (PFNGLSHADERSOURCEPROC)real_dlsym_fn(g_gl_handle, "glShaderSource");
+        }
     }
     if (!real_glCompileShader) {
         real_glCompileShader = (PFNGLCOMPILESHADERPROC)real_dlsym_fn(RTLD_NEXT, "glCompileShader");
+        if (!real_glCompileShader && g_gl_handle) {
+            real_glCompileShader = (PFNGLCOMPILESHADERPROC)real_dlsym_fn(g_gl_handle, "glCompileShader");
+        }
     }
     if (!real_eglGetProcAddress) {
         real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)real_dlsym_fn(RTLD_NEXT, "eglGetProcAddress");
+        if (!real_eglGetProcAddress && g_egl_handle) {
+            real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)real_dlsym_fn(g_egl_handle, "eglGetProcAddress");
+        }
     }
     if (!real_glXGetProcAddress) {
         real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)real_dlsym_fn(RTLD_NEXT, "glXGetProcAddress");
