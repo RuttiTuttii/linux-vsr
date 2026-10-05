@@ -112,6 +112,10 @@ static void vsr_hook_resolve(void) {
     vsr_hook_resolve_dlsym();
     // fall back to direct next lookup when bootstrap failed
     void *(*lookup)(void *, const char *) = real_dlsym_fn;
+    // handle bootstrap failure gracefully
+    if (!lookup) {
+        return;
+    }
     // clear errors before resolving
     dlerror();
     // resolve base glShaderSource symbol
@@ -123,6 +127,27 @@ static void vsr_hook_resolve(void) {
     // resolve glx lookup symbol for x11 paths
     real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)lookup(RTLD_NEXT, "glXGetProcAddress");
     // ignore dlerror here, null pointers are handled per call
+}
+
+// retry missing pointers when libraries load lazily after first call
+static void vsr_hook_retry_missing(void) {
+    // skip when lookup itself unavailable
+    if (!real_dlsym_fn) {
+        return;
+    }
+    // retry each missing entry, racy writes are idempotent
+    if (!real_glShaderSource) {
+        real_glShaderSource = (PFNGLSHADERSOURCEPROC)real_dlsym_fn(RTLD_NEXT, "glShaderSource");
+    }
+    if (!real_glCompileShader) {
+        real_glCompileShader = (PFNGLCOMPILESHADERPROC)real_dlsym_fn(RTLD_NEXT, "glCompileShader");
+    }
+    if (!real_eglGetProcAddress) {
+        real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)real_dlsym_fn(RTLD_NEXT, "eglGetProcAddress");
+    }
+    if (!real_glXGetProcAddress) {
+        real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)real_dlsym_fn(RTLD_NEXT, "glXGetProcAddress");
+    }
 }
 
 // initialize original function pointers using dlsym
@@ -237,6 +262,8 @@ __attribute__((visibility("default")))
 void glShaderSource(unsigned int shader, int count, const char *const *string, const int *length) {
     // ensure function pointers are bound
     vsr_hook_init();
+    // retry lazy libraries that loaded after first call
+    vsr_hook_retry_missing();
     // poll config file for runtime changes
     vsr_hook_maybe_reload();
     // handle missing original gracefully
@@ -330,6 +357,8 @@ __attribute__((visibility("default")))
 void glCompileShader(unsigned int shader) {
     // ensure function pointers are bound
     vsr_hook_init();
+    // retry lazy libraries that loaded after first call
+    vsr_hook_retry_missing();
     // invoke real implementation when available
     if (real_glCompileShader) {
         real_glCompileShader(shader);
@@ -341,6 +370,8 @@ __attribute__((visibility("default")))
 void* eglGetProcAddress(const char *procname) {
     // ensure function pointers are bound
     vsr_hook_init();
+    // retry lazy libraries that loaded after first call
+    vsr_hook_retry_missing();
     // validate input string with bound
     if (procname && vsr_safe_strlen(procname, 256) < 256) {
         // redirect glShaderSource resolution
@@ -372,6 +403,8 @@ __attribute__((visibility("default")))
 void* glXGetProcAddress(const char *procname) {
     // ensure function pointers are bound
     vsr_hook_init();
+    // retry lazy libraries that loaded after first call
+    vsr_hook_retry_missing();
     // validate input string with bound
     if (procname && vsr_safe_strlen(procname, 256) < 256) {
         // redirect glShaderSource resolution
