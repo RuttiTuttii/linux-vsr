@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <sys/stat.h>
+#include <time.h>
 
 // function pointer types for intercepted gl calls
 typedef void (*PFNGLSHADERSOURCEPROC)(unsigned int shader, int count, const char *const *string, const int *length);
@@ -23,6 +25,68 @@ static PFNGLXGETPROCADDRESSPROC real_glXGetProcAddress = NULL;
 
 // one-time init guard for thread safety
 static pthread_once_t g_hook_once = PTHREAD_ONCE_INIT;
+
+// cached config file state for hot reload
+static long long g_last_cfg_check_ms = 0;
+static long long g_last_cfg_mtime = 0;
+static char g_cfg_path[VSR_MAX_PATH_LEN] = {0};
+static bool g_cfg_path_init = false;
+
+// get monotonic time in milliseconds
+static long long vsr_hook_now_ms(void) {
+    // query monotonic clock
+    struct timespec ts = {0, 0};
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
+    // convert to milliseconds
+    return (long long)ts.tv_sec * 1000LL + (long long)(ts.tv_nsec / 1000000LL);
+}
+
+// poll config file for hot reload without restart
+static void vsr_hook_maybe_reload(void) {
+    // throttle checks to once per second
+    long long now = vsr_hook_now_ms();
+    if (now != 0 && g_last_cfg_check_ms != 0 && (now - g_last_cfg_check_ms) < 1000) {
+        return;
+    }
+    // update throttle marker
+    g_last_cfg_check_ms = now;
+    // resolve config path once
+    if (!g_cfg_path_init) {
+        // query default path
+        if (!vsr_config_default_path(g_cfg_path, sizeof(g_cfg_path))) {
+            return;
+        }
+        // mark resolved
+        g_cfg_path_init = true;
+    }
+    // stat config file
+    struct stat st = {0};
+    if (stat(g_cfg_path, &st) != 0) {
+        return;
+    }
+    // compare mtime with cache
+    long long mtime = (long long)st.st_mtime;
+    if (g_last_cfg_mtime == 0) {
+        // init baseline without reload
+        g_last_cfg_mtime = mtime;
+        return;
+    }
+    // reload when file changed
+    if (mtime != g_last_cfg_mtime) {
+        // update cache first to avoid loops
+        g_last_cfg_mtime = mtime;
+        // reload global config
+        vsr_config_reload();
+        // refresh logger verbosity
+        vsr_config_t *cfg = vsr_config_get();
+        if (cfg) {
+            vsr_log_init(cfg->debug);
+            vsr_log_info("vsr config hot-reloaded (mode: %s, sharpness: %.2f)", cfg->mode, (double)cfg->sharpness);
+        }
+    }
+}
 
 // resolve original function pointers using dlsym
 static void vsr_hook_resolve(void) {
@@ -83,6 +147,8 @@ __attribute__((visibility("default")))
 void glShaderSource(unsigned int shader, int count, const char *const *string, const int *length) {
     // ensure function pointers are bound
     vsr_hook_init();
+    // poll config file for runtime changes
+    vsr_hook_maybe_reload();
     // handle missing original gracefully
     if (!real_glShaderSource) {
         vsr_safety_set_error("glShaderSource original missing");
