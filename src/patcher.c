@@ -404,7 +404,11 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
     // copy with replacement loop
     const char *src_ptr = staged;
     char *dst_ptr = final_src;
+    // count scalar replacements for no-op detection
+    size_t scalar_done = 0;
     while (*src_ptr) {
+        // track whether current position was replaced
+        bool consumed = false;
         // detect texture keyword at this position
         if (strncmp(src_ptr, "texture", 7) == 0) {
             // probe ahead for sColor0 pattern
@@ -434,30 +438,72 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
                     }
                     // validate paren match found
                     if (*r == ')' && depth == 0) {
-                        // guard output capacity before emitting
-                        if ((size_t)(dst_ptr - final_src) + cas_len + 1 > out_cap) {
-                            free(staged);
-                            free(final_src);
-                            vsr_safety_set_error("inject output capacity exceeded");
-                            return NULL;
+                        // inspect trailing accessor to keep type scalar
+                        const char *after = r + 1;
+                        // allow whitespace between call and accessor
+                        while (*after == ' ' || *after == '\t') {
+                            after++;
                         }
-                        // emit cas call instead of texture fetch
-                        memcpy(dst_ptr, cas_call, cas_len);
-                        dst_ptr += cas_len;
-                        // advance past original call
-                        src_ptr = r + 1;
-                        continue;
+                        // accept scalar luma accessors and consume them
+                        size_t extra = 0;
+                        bool scalar = false;
+                        if (after[0] == '.' && (after[1] == 'x' || after[1] == 'r')) {
+                            // ensure accessor is not a longer swizzle prefix
+                            char third = after[2];
+                            bool boundary = (third == '\0') || (third != '.' && (third < 'a' || third > 'z')
+                                && (third < 'A' || third > 'Z') && (third < '0' || third > '9') && third != '_');
+                            if (boundary) {
+                                extra = (size_t)(after - (r + 1)) + 2;
+                                scalar = true;
+                            }
+                            // packed swizzle otherwise, leave fetch untouched
+                        } else if (after[0] != '.') {
+                            // bare call without accessor yields float texture texel, replace directly
+                            scalar = true;
+                        }
+                        // packed or vector accessor otherwise, leave fetch untouched
+                        if (scalar) {
+                            // guard output capacity before emitting
+                            if ((size_t)(dst_ptr - final_src) + cas_len + 1 > out_cap) {
+                                free(staged);
+                                free(final_src);
+                                vsr_safety_set_error("inject output capacity exceeded");
+                                return NULL;
+                            }
+                            // emit cas call instead of texture fetch
+                            memcpy(dst_ptr, cas_call, cas_len);
+                            dst_ptr += cas_len;
+                            // advance past original call and consumed accessor
+                            src_ptr = r + 1 + extra;
+                            scalar_done++;
+                            consumed = true;
+                        }
                     }
                 }
             }
         }
-        // copy single byte otherwise
-        *dst_ptr++ = *src_ptr++;
+        // copy single byte when not replaced
+        if (!consumed) {
+            // guard capacity for single byte
+            if ((size_t)(dst_ptr - final_src) + 2 > out_cap) {
+                free(staged);
+                free(final_src);
+                vsr_safety_set_error("inject output capacity exceeded");
+                return NULL;
+            }
+            *dst_ptr++ = *src_ptr++;
+        }
     }
     // terminate output
     *dst_ptr = '\0';
     // release staged buffer
     free(staged);
+    // treat zero scalar replacements as no-op to avoid shipping dead code
+    if (scalar_done == 0) {
+        free(final_src);
+        vsr_safety_set_error("inject no scalar luma fetch replaced");
+        return NULL;
+    }
     // validate final size
     size_t final_len = (size_t)(dst_ptr - final_src);
     if (final_len == 0 || final_len > VSR_MAX_OUTPUT_SIZE) {

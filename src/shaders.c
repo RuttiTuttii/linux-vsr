@@ -75,8 +75,20 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
     if (!buffer) {
         return NULL;
     }
+    // track write offset for ordered emission
+    size_t off = 0;
+    // emit badge helpers first so cas body can call them (no nested functions)
+    if (watermark) {
+        int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, off, opacity, size_frac);
+        // handle generation failure
+        if (wm < 0) {
+            free(buffer);
+            return NULL;
+        }
+        off += (size_t)wm;
+    }
     // format base cas function
-    int written = snprintf(buffer, VSR_SHADER_BUF,
+    int written = snprintf(buffer + off, VSR_SHADER_BUF - off,
         "\n// === linux-vsr: contrast adaptive sharpening (fidelityfx cas) ===\n"
         "float sample_luma_cas(sampler2D tex, vec2 uv, vec4 bounds) {\n"
         "    vec2 size = vec2(textureSize(tex, 0));\n"
@@ -102,39 +114,32 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
         "    res = clamp(res / (4.0 * w + 1.0), 0.0, 1.0);\n",
         (double)sharpness);
     // validate snprintf result
-    if (written <= 0 || (size_t)written >= VSR_SHADER_BUF) {
+    if (written <= 0 || (size_t)written >= VSR_SHADER_BUF - off) {
         free(buffer);
         vsr_safety_set_error("cas snippet truncated");
         return NULL;
     }
-    // append watermark tail when enabled
+    off += (size_t)written;
+    // append badge apply and function close when enabled
     if (watermark) {
-        // generate badge helpers
-        int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, (size_t)written, opacity, size_frac);
-        // handle generation failure
-        if (wm < 0) {
-            free(buffer);
-            return NULL;
-        }
-        written += wm;
         // append badge apply and function close
-        int tail = snprintf(buffer + written, VSR_SHADER_BUF - (size_t)written,
+        int tail = snprintf(buffer + off, VSR_SHADER_BUF - off,
             "    res = vsr_apply_badge(res, uv, bounds);\n"
             "    return res;\n"
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
-        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - (size_t)written) {
+        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
             free(buffer);
             vsr_safety_set_error("cas tail truncated");
             return NULL;
         }
     } else {
         // append plain return when badge disabled
-        int tail = snprintf(buffer + written, VSR_SHADER_BUF - (size_t)written,
+        int tail = snprintf(buffer + off, VSR_SHADER_BUF - off,
             "    return res;\n"
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
-        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - (size_t)written) {
+        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
             free(buffer);
             vsr_safety_set_error("cas tail truncated");
             return NULL;
@@ -154,8 +159,20 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
     if (!buffer) {
         return NULL;
     }
+    // track write offset for ordered emission
+    size_t off = 0;
+    // emit badge helpers first so easu body can call them (no nested functions)
+    if (watermark) {
+        int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, off, opacity, size_frac);
+        // handle generation failure
+        if (wm < 0) {
+            free(buffer);
+            return NULL;
+        }
+        off += (size_t)wm;
+    }
     // format directional easu base
-    int written = snprintf(buffer, VSR_SHADER_BUF,
+    int written = snprintf(buffer + off, VSR_SHADER_BUF - off,
         "\n// === linux-vsr: edge-adaptive spatial filter ===\n"
         "float sample_luma_cas(sampler2D tex, vec2 uv, vec4 bounds) {\n"
         "    vec2 size = vec2(textureSize(tex, 0));\n"
@@ -172,39 +189,32 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
         "    float res = (ml * wx + mr * wx + tc * wy + bc * wy + 2.0 * cc) / (2.0 * (wx + wy) + 2.0);\n"
         "    res = clamp(res, 0.0, 1.0);\n");
     // validate snprintf result
-    if (written <= 0 || (size_t)written >= VSR_SHADER_BUF) {
+    if (written <= 0 || (size_t)written >= VSR_SHADER_BUF - off) {
         free(buffer);
         vsr_safety_set_error("easu snippet truncated");
         return NULL;
     }
+    off += (size_t)written;
     // append watermark tail when enabled
     if (watermark) {
-        // generate badge helpers
-        int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, (size_t)written, opacity, size_frac);
-        // handle generation failure
-        if (wm < 0) {
-            free(buffer);
-            return NULL;
-        }
-        written += wm;
         // append badge apply and close
-        int tail = snprintf(buffer + written, VSR_SHADER_BUF - (size_t)written,
+        int tail = snprintf(buffer + off, VSR_SHADER_BUF - off,
             "    res = vsr_apply_badge(res, uv, bounds);\n"
             "    return res;\n"
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
-        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - (size_t)written) {
+        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
             free(buffer);
             vsr_safety_set_error("easu tail truncated");
             return NULL;
         }
     } else {
         // append plain return when badge disabled
-        int tail = snprintf(buffer + written, VSR_SHADER_BUF - (size_t)written,
+        int tail = snprintf(buffer + off, VSR_SHADER_BUF - off,
             "    return res;\n"
             "}\n// === end linux-vsr ===\n\n");
         // validate tail write
-        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - (size_t)written) {
+        if (tail <= 0 || (size_t)tail >= VSR_SHADER_BUF - off) {
             free(buffer);
             vsr_safety_set_error("easu tail truncated");
             return NULL;
