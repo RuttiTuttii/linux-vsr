@@ -211,3 +211,9 @@ VSR_MODE=cas VSR_SHARPNESS=0.30 ./bin/linux-vsr
 * **vulkan backend bypass:** if the browser is forced to run on pure vulkan, opengl/egl interception is bypassed. support for vulkan requires hooking `vkCreateShaderModule` with spir-v byte patching.
 * **ai super resolution status:** compiled tensorrt `.engine` models for rtx 5070 are prepared, but direct in-pipeline cuda-gl interop inference inside the hook is currently under development.
 
+---
+
+### license
+
+mit license - see [LICENSE](LICENSE) for details.
+
