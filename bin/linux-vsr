@@ -108,6 +108,9 @@ cmd_launch() {
     export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
     export MOZ_DISABLE_GMP_SANDBOX=1
     export MOZ_DISABLE_UTILITY_SANDBOX=1
+    # suppress crash-reporter and auto safe-mode dialogs
+    export MOZ_CRASHREPORTER_DISABLE=1
+    export MOZ_DISABLE_AUTO_SAFE_MODE=1
     export NVD_BACKEND="${NVD_BACKEND:-direct}"
     # configure vsr tuning options with safe defaults
     export VSR_SHARPNESS="${VSR_SHARPNESS:-0.22}"

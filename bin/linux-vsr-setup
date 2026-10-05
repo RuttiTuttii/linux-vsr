@@ -157,12 +157,17 @@ launch_with_dump() {
     export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
     export MOZ_DISABLE_GMP_SANDBOX=1
     export MOZ_DISABLE_UTILITY_SANDBOX=1
+    # suppress crash-reporter and auto safe-mode dialogs in dump instance
+    export MOZ_CRASHREPORTER_DISABLE=1
+    export MOZ_DISABLE_AUTO_SAFE_MODE=1
     # build isolation args to avoid remote-forward to running instance
     extra=()
     base="$(basename "${browser}")"
     if [[ "${base}" == *zen* || "${base}" == *firefox* ]]; then
         # force fresh firefox-family instance with temp profile
         prof="/tmp/vsr-dump-profile"
+        # remove stale profile so previous kills do not trigger safe-mode dialog
+        rm -rf "${prof}"
         mkdir -p "${prof}"
         extra=(--new-instance --profile "${prof}" "$@")
     elif [[ "${base}" == *chrom* || "${base}" == *brave* ]]; then
