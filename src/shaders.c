@@ -214,15 +214,15 @@ char* vsr_shader_generate_upscaler(const char *mode, float sharpness, bool water
         return vsr_shader_generate_cas_full(sharpness, watermark, opacity, size_frac);
     }
     // dispatch cas branch
-    if (strncmp(mode, "cas", VSR_MAX_MODE_LEN) == 0) {
+    if (strcmp(mode, "cas") == 0) {
         return vsr_shader_generate_cas_full(sharpness, watermark, opacity, size_frac);
     }
     // dispatch easu branch
-    if (strncmp(mode, "easu", VSR_MAX_MODE_LEN) == 0) {
+    if (strcmp(mode, "easu") == 0) {
         return vsr_shader_generate_easu_full(watermark, opacity, size_frac);
     }
     // handle off mode as null (no injection)
-    if (strncmp(mode, "off", VSR_MAX_MODE_LEN) == 0) {
+    if (strcmp(mode, "off") == 0) {
         return NULL;
     }
     // fallback to cas on unknown input

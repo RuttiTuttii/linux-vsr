@@ -174,7 +174,7 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
         return;
     }
     // handle off mode as passthrough
-    if (strncmp(mode, "off", sizeof(mode)) == 0) {
+    if (strcmp(mode, "off") == 0) {
         vsr_hook_forward_source(shader, count, string, length);
         return;
     }

@@ -182,7 +182,7 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
     opacity = vsr_safe_clamp_float(opacity, 0.05f, 1.0f);
     size_frac = vsr_safe_clamp_float(size_frac, 0.02f, 0.15f);
     // handle off mode as no-op
-    if (strncmp(mode, "off", VSR_MAX_MODE_LEN) == 0) {
+    if (strcmp(mode, "off") == 0) {
         return NULL;
     }
     // skip already patched content
