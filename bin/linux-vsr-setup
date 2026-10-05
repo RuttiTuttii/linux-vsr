@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# linux-vsr-setup: interactive wizard for browser video shader dump and setup
+# usage: ./bin/linux-vsr-setup [--browser zen] [--list] [--analyze-only]
+# flow: pick browser -> launch with dump -> play video -> close -> auto report
+# ==============================================================================
+
+set -u
+
+# resolve repository directory
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lib_vsr="${script_dir}/libvsr.so"
+dump_dir="/tmp/vsr_shaders"
+
+# known browser candidates in priority order
+candidates=(
+    "zen-browser"
+    "/opt/zen-browser-bin/zen-bin"
+    "firefox"
+    "chromium"
+    "brave"
+    "google-chrome-stable"
+    "mpv"
+    "vlc"
+)
+
+# print usage help
+usage() {
+    cat << 'EOF'
+usage: linux-vsr-setup [options]
+  --list            list detected browsers and exit
+  --browser <name>  use browser directly (skip menu)
+  --analyze-only    only analyze existing dumps in /tmp/vsr_shaders
+  --help            show this help
+interactive mode (no args):
+  shows menu, launches browser with shader dump,
+  you play any video ~10s, close browser, get verdict.
+EOF
+}
+
+# detect installed browsers
+detect_browsers() {
+    # iterate candidates and print found ones
+    for c in "${candidates[@]}"; do
+        if [[ "${c}" == /* ]]; then
+            # absolute path check
+            if [ -x "${c}" ]; then
+                echo "${c}"
+            fi
+        else
+            # PATH lookup
+            if command -v "${c}" &>/dev/null; then
+                command -v "${c}"
+            fi
+        fi
+    done
+}
+
+# analyze collected dumps and print verdict
+analyze_dumps() {
+    # handle missing dump dir
+    if [ ! -d "${dump_dir}" ] || [ -z "$(ls -A "${dump_dir}" 2>/dev/null)" ]; then
+        echo "[linux-vsr-setup] dumps not found in ${dump_dir}"
+        echo "play a video for ~10s before closing the browser,"
+        echo "startup shaders alone are not enough for video pipeline."
+        return 1
+    fi
+    # count files
+    total="$(ls -1 "${dump_dir}" | wc -l)"
+    echo "[linux-vsr-setup] collected dumps: ${total} in ${dump_dir}"
+    # count modern firefox/zen video shaders
+    modern="$(grep -l "vUV_y" "${dump_dir}"/* 2>/dev/null | wc -l)"
+    # count legacy video shaders
+    legacy="$(grep -l "sample_yuv" "${dump_dir}"/* 2>/dev/null | wc -l)"
+    # count successfully patched shaders
+    patched="$(grep -l "sample_luma_cas" "${dump_dir}"/* 2>/dev/null | wc -l)"
+    # print breakdown
+    echo "  modern yuv (firefox157/zen): ${modern}"
+    echo "  legacy yuv (old webrender):  ${legacy}"
+    echo "  patched with cas:             ${patched}"
+    # show per-file one-liners
+    echo "--- files ---"
+    for f in "${dump_dir}"/*; do
+        base="$(basename "${f}")"
+        marks=""
+        grep -q "sample_luma_cas" "${f}" 2>/dev/null && marks="${marks}PATCHED "
+        grep -q "vUV_y" "${f}" 2>/dev/null && marks="${marks}MODERN "
+        grep -q "sample_yuv" "${f}" 2>/dev/null && marks="${marks}LEGACY "
+        grep -q "vsr_badge_mask" "${f}" 2>/dev/null && marks="${marks}BADGE "
+        echo "  ${base}: ${marks:-other}"
+    done
+    # print verdict
+    if [ "${patched}" -gt 0 ]; then
+        echo "[linux-vsr-setup] verdict: WORKS - upscaler injected into video pipeline"
+        echo "to keep it always on, add launcher to autostart:"
+        echo "  ./bin/linux-vsr-setup --install-desktop zen-browser"
+        return 0
+    fi
+    if [ "${modern}" -gt 0 ] || [ "${legacy}" -gt 0 ]; then
+        echo "[linux-vsr-setup] verdict: video shaders seen but NOT patched"
+        echo "send ${dump_dir} content for patcher tuning."
+        return 2
+    fi
+    echo "[linux-vsr-setup] verdict: no video shaders captured"
+    echo "you probably did not play a video, retry and keep video playing."
+    return 3
+}
+
+# install desktop wrapper for autostart
+install_desktop() {
+    # parse target browser
+    target="${1:-zen-browser}"
+    # resolve wrapper exec path
+    exec_path="${script_dir}/bin/linux-vsr launch ${target}"
+    # build desktop file
+    desk_dir="$HOME/.local/share/applications"
+    mkdir -p "${desk_dir}"
+    desk_file="${desk_dir}/linux-vsr-${target}.desktop"
+    # write desktop entry
+    cat > "${desk_file}" << EOF
+[Desktop Entry]
+Name=${target} (VSR Upscale)
+Comment=${target} with native hardware video super resolution
+Exec=${exec_path} %U
+Icon=${target}
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+EOF
+    echo "[linux-vsr-setup] desktop entry installed: ${desk_file}"
+    echo "it will appear in your app menu, set it as default browser to always use vsr."
+}
+
+# launch browser with dump enabled
+launch_with_dump() {
+    # parse browser binary and extra args
+    browser="$1"
+    shift || true
+    # ensure library built
+    if [ ! -f "${lib_vsr}" ]; then
+        echo "[linux-vsr-setup] building library..."
+        make -C "${script_dir}" -j"$(nproc)"
+    fi
+    # clean previous dumps
+    rm -rf "${dump_dir}"
+    mkdir -p "${dump_dir}"
+    # export preload and debug env
+    export LD_PRELOAD="${lib_vsr}${LD_PRELOAD:+:${LD_PRELOAD}}"
+    export VSR_DEBUG=1
+    export VSR_DUMP=1
+    export VSR_WATERMARK=1
+    export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+    export MOZ_DISABLE_RDD_SANDBOX=1
+    # print instructions
+    echo "================================================================"
+    echo " launching: ${browser} $*"
+    echo " 1. open any video (youtube 720p+ is ideal)"
+    echo " 2. let it play ~10 seconds"
+    echo " 3. close the browser window"
+    echo " dump dir: ${dump_dir}"
+    echo "================================================================"
+    # launch browser in foreground so close = continue
+    "${browser}" "$@" || true
+    echo "[linux-vsr-setup] browser closed, analyzing..."
+    # analyze results
+    analyze_dumps || true
+}
+
+# parse cli flags
+mode="interactive"
+forced_browser=""
+if [ $# -gt 0 ]; then
+    case "$1" in
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --list)
+            echo "detected browsers:"
+            detect_browsers
+            exit 0
+            ;;
+        --analyze-only)
+            analyze_dumps
+            exit $?
+            ;;
+        --browser)
+            forced_browser="${2:-}"
+            if [ -z "${forced_browser}" ]; then
+                echo "missing browser name" >&2
+                exit 1
+            fi
+            mode="forced"
+            ;;
+        --install-desktop)
+            install_desktop "${2:-zen-browser}"
+            exit 0
+            ;;
+        *)
+            echo "unknown flag: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+fi
+
+# handle forced browser mode
+if [ "${mode}" = "forced" ]; then
+    launch_with_dump "${forced_browser}"
+    exit 0
+fi
+
+# interactive menu mode
+mapfile -t found < <(detect_browsers)
+# handle nothing found
+if [ "${#found[@]}" -eq 0 ]; then
+    echo "[linux-vsr-setup] no known browsers found in PATH."
+    read -rp "type full path to your browser binary: " custom
+    if [ -x "${custom}" ]; then
+        launch_with_dump "${custom}"
+        exit 0
+    fi
+    echo "not executable: ${custom}" >&2
+    exit 1
+fi
+# show numbered menu
+echo "detected browsers:"
+for i in "${!found[@]}"; do
+    echo "  $((i+1))) ${found[$i]}"
+done
+echo "  c) custom path"
+# prompt choice
+read -rp "pick number or path [1]: " choice
+choice="${choice:-1}"
+# handle custom path input
+if [[ "${choice}" == "c" || "${choice}" == /* ]]; then
+    if [[ "${choice}" == "c" ]]; then
+        read -rp "full path to browser binary: " custom
+    else
+        custom="${choice}"
+    fi
+    if [ ! -x "${custom}" ]; then
+        echo "not executable: ${custom}" >&2
+        exit 1
+    fi
+    launch_with_dump "${custom}"
+    exit 0
+fi
+# validate numeric choice
+if ! [[ "${choice}" =~ ^[0-9]+$ ]] || [ "${choice}" -lt 1 ] || [ "${choice}" -gt "${#found[@]}" ]; then
+    echo "invalid choice" >&2
+    exit 1
+fi
+# launch selected browser
+launch_with_dump "${found[$((choice-1))]}"
