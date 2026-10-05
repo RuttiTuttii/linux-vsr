@@ -19,12 +19,21 @@ typedef void (*PFNGLSHADERSOURCEPROC)(unsigned int shader, int count, const char
 typedef void (*PFNGLCOMPILESHADERPROC)(unsigned int shader);
 typedef void* (*PFNEGLGETPROCADDRESSPROC)(const char *procname);
 typedef void* (*PFNGLXGETPROCADDRESSPROC)(const char *procname);
+typedef void (*PFNGLGETSHADERIVPROC)(unsigned int shader, unsigned int pname, int *params);
+typedef void (*PFNGLGETSHADERINFOLOGPROC)(unsigned int shader, int maxlen, int *length, char *infolog);
 
 // cached original function pointers
 static PFNGLSHADERSOURCEPROC real_glShaderSource = NULL;
 static PFNGLCOMPILESHADERPROC real_glCompileShader = NULL;
 static PFNEGLGETPROCADDRESSPROC real_eglGetProcAddress = NULL;
 static PFNGLXGETPROCADDRESSPROC real_glXGetProcAddress = NULL;
+// gl enum values for compile diagnostics without gl headers
+#define VSR_GL_COMPILE_STATUS 0x8B81
+#define VSR_GL_INFO_LOG_LENGTH 0x8B84
+
+// cached diagnostic pointers (used internally, never interposed)
+static PFNGLGETSHADERIVPROC real_glGetShaderiv = NULL;
+static PFNGLGETSHADERINFOLOGPROC real_glGetShaderInfoLog = NULL;
 
 // one-time init guard for thread safety
 static pthread_once_t g_hook_once = PTHREAD_ONCE_INIT;
@@ -173,6 +182,9 @@ static void vsr_hook_resolve(void) {
     real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)lookup(RTLD_NEXT, "eglGetProcAddress");
     // resolve glx lookup symbol for x11 paths
     real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)lookup(RTLD_NEXT, "glXGetProcAddress");
+    // resolve diagnostic symbols for compile status checks
+    real_glGetShaderiv = (PFNGLGETSHADERIVPROC)lookup(RTLD_NEXT, "glGetShaderiv");
+    real_glGetShaderInfoLog = (PFNGLGETSHADERINFOLOGPROC)lookup(RTLD_NEXT, "glGetShaderInfoLog");
     // fall back to explicit handles when next-order search missed
     if (!real_eglGetProcAddress && g_egl_handle) {
         real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)lookup(g_egl_handle, "eglGetProcAddress");
@@ -215,6 +227,12 @@ static void vsr_hook_retry_missing(void) {
     }
     if (!real_glXGetProcAddress) {
         real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)real_dlsym_fn(RTLD_NEXT, "glXGetProcAddress");
+    }
+    if (!real_glGetShaderiv) {
+        real_glGetShaderiv = (PFNGLGETSHADERIVPROC)real_dlsym_fn(RTLD_NEXT, "glGetShaderiv");
+    }
+    if (!real_glGetShaderInfoLog) {
+        real_glGetShaderInfoLog = (PFNGLGETSHADERINFOLOGPROC)real_dlsym_fn(RTLD_NEXT, "glGetShaderInfoLog");
     }
 }
 
@@ -452,7 +470,47 @@ void glCompileShader(unsigned int shader) {
     // invoke real implementation when available
     if (real_glCompileShader) {
         real_glCompileShader(shader);
+    } else {
+        return;
     }
+    // query compile status when diagnostics available
+    if (!real_glGetShaderiv || shader == 0) {
+        return;
+    }
+    // read compile status flag
+    int status = 0;
+    real_glGetShaderiv(shader, VSR_GL_COMPILE_STATUS, &status);
+    // handle successful compile silently
+    if (status != 0) {
+        return;
+    }
+    // fetch info log length with bound
+    int log_len = 0;
+    real_glGetShaderiv(shader, VSR_GL_INFO_LOG_LENGTH, &log_len);
+    if (log_len <= 0 || log_len > 8192) {
+        log_len = 512;
+    }
+    // allocate log buffer
+    char *log_buf = (char *)vsr_safe_malloc((size_t)log_len + 1);
+    if (!log_buf) {
+        return;
+    }
+    // read info log text
+    if (real_glGetShaderInfoLog) {
+        real_glGetShaderInfoLog(shader, log_len, NULL, log_buf);
+        log_buf[log_len] = '\0';
+    } else {
+        log_buf[0] = '\0';
+    }
+    // append failure record for triage
+    FILE *fp = fopen("/tmp/vsr_compile_errors.log", "a");
+    if (fp) {
+        fprintf(fp, "pid=%d shader=%u status=FAIL log=%.500s\n", (int)getpid(), shader, log_buf);
+        fclose(fp);
+    }
+    // report failure via error channel
+    vsr_log_error("shader %u failed to compile: %.200s", shader, log_buf);
+    free(log_buf);
 }
 
 // intercepted eglGetProcAddress function for wayland and egl applications
