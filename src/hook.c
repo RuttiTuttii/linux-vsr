@@ -29,6 +29,21 @@ static PFNGLXGETPROCADDRESSPROC real_glXGetProcAddress = NULL;
 // one-time init guard for thread safety
 static pthread_once_t g_hook_once = PTHREAD_ONCE_INIT;
 
+// declare glibc internal lookup to avoid recursion in dlsym hook
+extern void *__libc_dlsym(void *map, const char *name);
+
+// cached real dlsym pointer resolved via libc internal
+static void *(*real_dlsym_fn)(void *, const char *) = NULL;
+static void *(*real_dlvsym_fn)(void *, const char *, const char *) = NULL;
+
+// resolve real dlsym/dlvsym without recursion
+static void vsr_hook_resolve_dlsym(void) {
+    // use libc internal to bypass own interposition
+    real_dlsym_fn = (void *(*)(void *, const char *))__libc_dlsym((void *)-1, "dlsym");
+    // resolve dlvsym variant when available
+    real_dlvsym_fn = (void *(*)(void *, const char *, const char *))__libc_dlsym((void *)-1, "dlvsym");
+}
+
 // cached config file state for hot reload
 static long long g_last_cfg_check_ms = 0;
 static long long g_last_cfg_mtime = 0;
@@ -93,16 +108,22 @@ static void vsr_hook_maybe_reload(void) {
 
 // resolve original function pointers using dlsym
 static void vsr_hook_resolve(void) {
+    // resolve libc lookup first to avoid recursion
+    vsr_hook_resolve_dlsym();
+    // use libc internal directly, our own dlsym hook is active now
+    void *(*libc_lookup)(void *, const char *) = real_dlsym_fn
+        ? real_dlsym_fn
+        : (void *(*)(void *, const char *))__libc_dlsym((void *)-1, "dlsym");
     // clear errors before resolving
     dlerror();
     // resolve base glShaderSource symbol
-    real_glShaderSource = (PFNGLSHADERSOURCEPROC)dlsym(RTLD_NEXT, "glShaderSource");
+    real_glShaderSource = (PFNGLSHADERSOURCEPROC)libc_lookup(RTLD_NEXT, "glShaderSource");
     // resolve compile symbol
-    real_glCompileShader = (PFNGLCOMPILESHADERPROC)dlsym(RTLD_NEXT, "glCompileShader");
+    real_glCompileShader = (PFNGLCOMPILESHADERPROC)libc_lookup(RTLD_NEXT, "glCompileShader");
     // resolve egl lookup symbol
-    real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)dlsym(RTLD_NEXT, "eglGetProcAddress");
+    real_eglGetProcAddress = (PFNEGLGETPROCADDRESSPROC)libc_lookup(RTLD_NEXT, "eglGetProcAddress");
     // resolve glx lookup symbol for x11 paths
-    real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)dlsym(RTLD_NEXT, "glXGetProcAddress");
+    real_glXGetProcAddress = (PFNGLXGETPROCADDRESSPROC)libc_lookup(RTLD_NEXT, "glXGetProcAddress");
     // ignore dlerror here, null pointers are handled per call
 }
 
@@ -373,8 +394,74 @@ void* glXGetProcAddress(const char *procname) {
         return real_glXGetProcAddress(procname);
     }
     // fallback to direct symbol lookup
-    if (procname) {
-        return dlsym(RTLD_NEXT, procname);
+    if (procname && real_dlsym_fn) {
+        return real_dlsym_fn(RTLD_NEXT, procname);
     }
     return NULL;
+}
+
+// intercepted glXGetProcAddressARB alias for compatibility
+__attribute__((visibility("default")))
+void* glXGetProcAddressARB(const char *procname) {
+    // delegate to main glx handler
+    return glXGetProcAddress(procname);
+}
+
+// intercepted eglGetProcAddressKHR alias for wayland drivers
+__attribute__((visibility("default")))
+void* eglGetProcAddressKHR(const char *procname) {
+    // delegate to main egl handler
+    return eglGetProcAddress(procname);
+}
+
+// intercepted dlsym to catch direct libGL handle lookups
+__attribute__((visibility("default")))
+void* dlsym(void *handle, const char *symbol) {
+    // lazily resolve real lookup without recursion
+    if (!real_dlsym_fn) {
+        real_dlsym_fn = (void *(*)(void *, const char *))__libc_dlsym((void *)-1, "dlsym");
+    }
+    // handle missing resolver gracefully
+    if (!real_dlsym_fn) {
+        return NULL;
+    }
+    // redirect shader entry points resolved via explicit handles
+    if (strcmp(symbol, "glShaderSource") == 0) {
+        vsr_hook_init();
+        return (void*)glShaderSource;
+    }
+    if (strcmp(symbol, "glShaderSourceARB") == 0) {
+        vsr_hook_init();
+        return (void*)glShaderSourceARB;
+    }
+    if (strcmp(symbol, "glCompileShader") == 0) {
+        vsr_hook_init();
+        return (void*)glCompileShader;
+    }
+    // forward all other lookups
+    return real_dlsym_fn(handle, symbol);
+}
+
+// intercepted dlvsym variant for versioned lookups
+__attribute__((visibility("default")))
+void* dlvsym(void *handle, const char *symbol, const char *version) {
+    // lazily resolve real lookup without recursion
+    if (!real_dlvsym_fn) {
+        real_dlvsym_fn = (void *(*)(void *, const char *, const char *))__libc_dlsym((void *)-1, "dlvsym");
+    }
+    // handle missing resolver gracefully
+    if (!real_dlvsym_fn) {
+        return NULL;
+    }
+    // redirect versioned shader lookups as well
+    if (strcmp(symbol, "glShaderSource") == 0) {
+        vsr_hook_init();
+        return (void*)glShaderSource;
+    }
+    if (strcmp(symbol, "glShaderSourceARB") == 0) {
+        vsr_hook_init();
+        return (void*)glShaderSourceARB;
+    }
+    // forward all other lookups
+    return real_dlvsym_fn(handle, symbol, version);
 }
