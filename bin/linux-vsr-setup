@@ -172,9 +172,10 @@ launch_with_dump() {
     if [[ "${base}" == *zen* || "${base}" == *firefox* ]]; then
         # force fresh firefox-family instance with temp profile
         prof="/tmp/vsr-dump-profile"
-        # remove stale profile, but do not pre-create it:
-        # an empty dir triggers profile missing dialog, browser must init it
-        rm -rf "${prof}"
+        # pre-create dir: zen will not init a missing path (profile missing dialog)
+        mkdir -p "${prof}"
+        # drop stale crash markers so previous kills do not trigger safe-mode dialog
+        rm -rf "${prof}/lock" "${prof}/.parentlock" "${prof}/crashes" "${prof}/minidumps" "${prof}/compatibility.ini"
         extra=(--new-instance --profile "${prof}" "$@")
     elif [[ "${base}" == *chrom* || "${base}" == *brave* ]]; then
         # force fresh chromium-family instance with temp data dir
