@@ -361,8 +361,22 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
         return NULL;
     }
     // second pass: build output with paren-aware replacement
-    // allocate worst-case buffer (same size is enough since cas call is shorter)
-    char *final_src = (char *)vsr_safe_malloc(staged_cur + 1);
+    // note: cas call can be longer than the original fetch, size with headroom
+    size_t out_cap = 0;
+    size_t headroom = 0;
+    if (!vsr_safe_mul_size(replaced, cas_len + 1, &headroom) || !vsr_safe_add_size(staged_cur, headroom, &out_cap) || !vsr_safe_add_size(out_cap, 1, &out_cap)) {
+        free(staged);
+        vsr_safety_set_error("inject output size overflow");
+        return NULL;
+    }
+    // enforce global output limit
+    if (out_cap > VSR_MAX_OUTPUT_SIZE) {
+        free(staged);
+        vsr_safety_set_error("inject output exceeds limit");
+        return NULL;
+    }
+    // allocate output buffer with growth headroom
+    char *final_src = (char *)vsr_safe_malloc(out_cap);
     // handle allocation failure
     if (!final_src) {
         free(staged);
@@ -401,6 +415,13 @@ char* vsr_patcher_inject_upscaler_full(const char *source, const char *mode, flo
                     }
                     // validate paren match found
                     if (*r == ')' && depth == 0) {
+                        // guard output capacity before emitting
+                        if ((size_t)(dst_ptr - final_src) + cas_len + 1 > out_cap) {
+                            free(staged);
+                            free(final_src);
+                            vsr_safety_set_error("inject output capacity exceeded");
+                            return NULL;
+                        }
                         // emit cas call instead of texture fetch
                         memcpy(dst_ptr, cas_call, cas_len);
                         dst_ptr += cas_len;

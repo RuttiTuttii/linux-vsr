@@ -187,6 +187,19 @@ void test_patcher_injection_safety(void) {
     char *easu = vsr_patcher_inject_upscaler_full(valid, "easu", 0.22f, false, 0.45f, 0.06f);
     assert(easu != NULL);
     free(easu);
+    // test short luma call where replacement is longer than original (growth path)
+    const char *short_call =
+        "#version 300 es\n"
+        "in vec2 vUV_y;\n"
+        "flat in vec4 vUVBounds_y;\n"
+        "void main() {\n"
+        "    vec3 ycbcr_sample_1;\n"
+        "    ycbcr_sample_1.x = texture(sColor0, vUV_y).x;\n"
+        "}\n";
+    char *grown = vsr_patcher_inject_upscaler_full(short_call, "cas", 0.22f, false, 0.45f, 0.06f);
+    assert(grown != NULL);
+    assert(strstr(grown, "sample_luma_cas(sColor0, vUV_y, vUVBounds_y)") != NULL);
+    free(grown);
     // test modern pipeline injection
     const char *modern =
         "#version 300 es\n"
