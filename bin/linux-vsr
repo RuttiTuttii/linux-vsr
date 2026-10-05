@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# linux-vsr: universal video super resolution launcher for linux
+# preloads libvsr.so into browsers and video players
+# ==============================================================================
+
+set -euo pipefail
+
+# resolve repository directory
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lib_vsr="${script_dir}/libvsr.so"
+
+# ensure library is built
+if [ ! -f "${lib_vsr}" ]; then
+    echo -e "\033[1;33m[linux-vsr]\033[0m library not found, compiling..."
+    make -C "${script_dir}" -j"$(nproc)"
+fi
+
+# configure nvidia vaapi and wayland environment
+export LIBVA_DRIVER_NAME=nvidia
+export MOZ_DISABLE_RDD_SANDBOX=1
+export NVD_BACKEND=direct
+
+# configure vsr tuning options
+export VSR_SHARPNESS="${VSR_SHARPNESS:-0.22}"
+export VSR_DEBUG="${VSR_DEBUG:-1}"
+export VSR_ENABLE="${VSR_ENABLE:-1}"
+
+# attach preload library
+if [ -n "${LD_PRELOAD:-}" ]; then
+    export LD_PRELOAD="${lib_vsr}:${LD_PRELOAD}"
+else
+    export LD_PRELOAD="${lib_vsr}"
+fi
+
+# determine target application to run
+target_bin=""
+if [ $# -gt 0 ]; then
+    target_bin="$1"
+    shift
+else
+    # default search order: zen -> firefox -> brave -> google-chrome -> chromium
+    for candidate in /opt/zen-browser-bin/zen-bin zen-browser zen firefox brave google-chrome-stable chromium; do
+        if command -v "${candidate}" &>/dev/null; then
+            target_bin="${candidate}"
+            break
+        fi
+    done
+fi
+
+if [ -z "${target_bin}" ]; then
+    echo -e "\033[1;31m[linux-vsr error]\033[0m no browser or media player found to launch"
+    exit 1
+fi
+
+echo -e "\033[1;32m[linux-vsr]\033[0m launching ${target_bin} with native hardware vsr..."
+exec "${target_bin}" "$@"
