@@ -151,19 +151,47 @@ launch_with_dump() {
     export VSR_WATERMARK=1
     export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
     export MOZ_DISABLE_RDD_SANDBOX=1
+    # build isolation args to avoid remote-forward to running instance
+    extra=()
+    base="$(basename "${browser}")"
+    if [[ "${base}" == *zen* || "${base}" == *firefox* ]]; then
+        # force fresh firefox-family instance with temp profile
+        prof="/tmp/vsr-dump-profile"
+        mkdir -p "${prof}"
+        extra=(--new-instance --profile "${prof}" "$@")
+    elif [[ "${base}" == *chrom* || "${base}" == *brave* ]]; then
+        # force fresh chromium-family instance with temp data dir
+        prof="/tmp/vsr-dump-profile-chrome"
+        mkdir -p "${prof}"
+        extra=(--user-data-dir="${prof}" --no-first-run "$@")
+    else
+        extra=("$@")
+    fi
+    # warn when main instance already running
+    if pgrep -f "${base}" &>/dev/null; then
+        echo "[linux-vsr-setup] note: ${base} already running,"
+        echo "using isolated profile so dump instance does not forward to it."
+    fi
     # print instructions
     echo "================================================================"
-    echo " launching: ${browser} $*"
+    echo " launching: ${browser} ${extra[*]}"
     echo " 1. open any video (youtube 720p+ is ideal)"
     echo " 2. let it play ~10 seconds"
-    echo " 3. close the browser window"
+    echo " 3. press ENTER here (no need to close main browser)"
     echo " dump dir: ${dump_dir}"
     echo "================================================================"
-    # launch browser in foreground so close = continue
-    "${browser}" "$@" || true
-    echo "[linux-vsr-setup] browser closed, analyzing..."
+    # launch browser in background to survive remote-forward exits
+    "${browser}" "${extra[@]}" &>/dev/null &
+    child=$!
+    # wait for user confirmation instead of process exit
+    read -rp "press ENTER after video played 10s... " _
+    # show live dump count before analysis
+    count="$(ls -1 "${dump_dir}" 2>/dev/null | wc -l)"
+    echo "[linux-vsr-setup] dumps so far: ${count}, analyzing..."
     # analyze results
     analyze_dumps || true
+    # offer to kill dump instance
+    kill "${child}" 2>/dev/null || true
 }
 
 # parse cli flags
