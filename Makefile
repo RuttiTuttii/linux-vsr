@@ -31,6 +31,9 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 $(BUILDDIR)/%.o: $(TESTDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# ensure rebuild on header changes
+$(OBJECTS) $(TEST_OBJECTS): $(wildcard include/vsr/*.h) Makefile
+
 $(LIB_TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
