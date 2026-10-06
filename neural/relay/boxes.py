@@ -114,6 +114,26 @@ def read_timescale(init):
     return scale if scale else None
 
 
+# read track fragment default sample duration from tfhd box
+def read_tfhd_default(media, traf_off, traf_end):
+    # scan traf children for tfhd entry
+    cur = traf_off
+    while cur + 8 <= traf_end:
+        box = read_box(media, cur)
+        if not box:
+            return None
+        kind, size, header = box
+        if kind == "tfhd":
+            # parse flags for default duration presence
+            flags = int.from_bytes(media[cur + header + 1:cur + header + 4], "big")
+            if flags & 0x8:
+                (dur,) = struct.unpack_from(">I", media, cur + header + 4)
+                return dur
+            return None
+        cur += size
+    return None
+
+
 # sum trun sample durations for exact segment duration
 def read_trun_duration(media, timescale):
     # locate trun boxes inside moof trafs
@@ -130,6 +150,8 @@ def read_trun_duration(media, timescale):
                 break
             skind, ssize, sheader = box
             if skind == "traf":
+                # read default duration fallback from tfhd
+                default_dur = read_tfhd_default(media, cur + sheader, cur + ssize)
                 res = find_path(media, cur + sheader, cur + ssize, ["trun"])
                 if res:
                     roff, rend = res
@@ -148,21 +170,18 @@ def read_trun_duration(media, timescale):
                         # stop on truncated tables
                         if pos + 4 > rend:
                             break
-                        dur = comp = 0
-                        size = 0
-                        flags2 = 0
+                        dur = 0
                         # read present fields by flag bits
                         if flags & 0x100:
                             (dur,) = struct.unpack_from(">I", media, pos)
                             pos += 4
+                        elif default_dur:
+                            dur = default_dur
                         if flags & 0x200:
-                            (size,) = struct.unpack_from(">I", media, pos)
                             pos += 4
                         if flags & 0x400:
-                            (flags2,) = struct.unpack_from(">I", media, pos)
                             pos += 4
                         if flags & 0x800:
-                            (comp,) = struct.unpack_from(">i", media, pos)
                             pos += 4
                         total += dur
                         found_any = True
