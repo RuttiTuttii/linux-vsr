@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
+#include <time.h>
 
 #include "common/msg.h"
 #include "filters/f_autoconvert.h"
@@ -63,6 +64,8 @@ struct priv {
     struct vsr_npp npp;
     int npp_ready;
     void *session;
+    long long frames;
+    double total_ms;
     void *cuda_ctx;
     unsigned long long dev_in;
     unsigned long long dev_out;
@@ -168,6 +171,14 @@ static int vsr_npp_open(struct mp_filter *f, struct priv *priv) {
     return 1;
 }
 
+// monotonic milliseconds for frame timing
+static double vsr_now_ms(void) {
+    // read monotonic clock
+    struct timespec ts = {0, 0};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+}
+
 // upscale device rgba buffer and wrap result as output frame
 // mutates frame payload on success, returns zero on success
 static int vsr_run_and_wrap(struct mp_filter *f, struct priv *priv,
@@ -175,11 +186,24 @@ static int vsr_run_and_wrap(struct mp_filter *f, struct priv *priv,
     // derive frame dimensions
     int w = img->w;
     int h = img->h;
+    // time neural upscale call
+    double t0 = vsr_now_ms();
     // run neural upscale on device
-    if (priv->api.upscale(priv->session, dev_src, (unsigned)w, (unsigned)h, priv->dev_out)) {
+    int rc = priv->api.upscale(priv->session, dev_src, (unsigned)w, (unsigned)h, priv->dev_out);
+    priv->cuda.ctx_sync();
+    // accumulate timing stats
+    double dt = vsr_now_ms() - t0;
+    priv->frames++;
+    priv->total_ms += dt;
+    // report average every 300 frames
+    if (priv->frames % 300 == 0) {
+        MP_VERBOSE(f, "vsr: avg %.2f ms over %lld frames\n",
+            priv->total_ms / (double)priv->frames, (long long)priv->frames);
+    }
+    // handle inference failure
+    if (rc) {
         return 1;
     }
-    priv->cuda.ctx_sync();
     // download upscaled frame reusing host scratch buffer
     int ow = priv->out_w;
     int oh = priv->out_h;
@@ -312,11 +336,14 @@ static int vsr_backend_ensure(struct mp_filter *f, struct priv *priv, int w, int
     int oh = h * priv->scale;
     // reconfigure session when size changed
     if (!priv->loaded || w != priv->cur_w || h != priv->cur_h) {
+        // warn about one-time model load stall
+        MP_WARN(f, "vsr: loading neural models for %dx%d (one-time stall)\n", ow, oh);
         // load models for new output size
         if (priv->api.load(priv->session, (unsigned)ow, (unsigned)oh)) {
             MP_ERR(f, "vsr: neural load failed\n");
             return 0;
         }
+        MP_WARN(f, "vsr: models ready\n");
         // resize device buffers for new frame size
         size_t need_in = (size_t)w * h * 4u;
         size_t need_out = (size_t)ow * oh * 4u;
