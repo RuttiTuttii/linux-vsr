@@ -20,7 +20,10 @@ CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patch
 
 .PHONY: all clean test test-neural neural-rt
 
-neural-rt: $(BUILDDIR)/vsr_rt_bench $(BUILDDIR)/vsr_rt_test
+neural-rt: $(BUILDDIR)/vsr_rt_bench $(BUILDDIR)/vsr_rt_test $(BUILDDIR)/libvsr_rt.so
+
+$(BUILDDIR)/libvsr_rt.so: neural/vsr_rt/vsr_rt.c | $(BUILDDIR)
+	$(CC) -O2 -Wall -Wextra -Werror -shared -fPIC -I neural/vsr_rt -o $@ $^ -ldl
 
 $(BUILDDIR)/vsr_rt_bench: neural/vsr_rt/vsr_rt.c neural/vsr_rt/bench_rt.c | $(BUILDDIR)
 	$(CC) -O2 -Wall -Wextra -Werror -I neural/vsr_rt -fstack-protector-strong -D_FORTIFY_SOURCE=2 -o $@ $^ -ldl -lm
