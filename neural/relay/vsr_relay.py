@@ -95,6 +95,10 @@ def codec_for_url(url):
     if "webm" in url:
         return ("vp9", "webm")
     return ("h264", "mp4")
+
+
+# decide whether url carries video bytes worth transcoding
+def is_video_url(url):
     # inspect mime query marker for video kinds
     query = urllib.parse.urlparse(url).query
     params = urllib.parse.parse_qs(query)
