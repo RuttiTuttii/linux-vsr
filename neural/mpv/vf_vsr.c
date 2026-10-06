@@ -15,6 +15,19 @@
 #include "video/img_format.h"
 #include "video/mp_image.h"
 #include "video/mp_image_pool.h"
+#include <libavutil/frame.h>
+
+// roi struct for npp geometry calls
+struct vsr_nppi_size {
+    int width;
+    int height;
+};
+
+// npp entry point for nv12 to rgba conversion on device
+struct vsr_npp {
+    void *lib;
+    int (*nv12_to_rgba)(const unsigned char *const *, int, unsigned char *, int, struct vsr_nppi_size);
+};
 
 #include "options/m_option.h"
 
@@ -47,12 +60,16 @@ struct priv {
     struct mp_autoconvert *conv;
     struct vsr_api api;
     struct vsr_cuda cuda;
+    struct vsr_npp npp;
+    int npp_ready;
     void *session;
     void *cuda_ctx;
     unsigned long long dev_in;
     unsigned long long dev_out;
+    unsigned long long dev_rgba;
     unsigned char *host_tmp;
     size_t dev_cap;
+    size_t rgba_cap;
     int cur_w;
     int cur_h;
     int out_w;
@@ -125,6 +142,137 @@ static int vsr_cuda_open(struct vsr_cuda *cuda) {
         return 0;
     }
     return 1;
+}
+
+// load npp color conversion entry point once
+static int vsr_npp_open(struct mp_filter *f, struct priv *priv) {
+    // skip when already resolved
+    if (priv->npp_ready) {
+        return 1;
+    }
+    // open npp color library from loader path
+    priv->npp.lib = dlopen("libnppicc.so.12", RTLD_NOW | RTLD_LOCAL);
+    // handle missing library
+    if (!priv->npp.lib) {
+        MP_ERR(f, "vsr: libnppicc.so.12 missing\n");
+        return 0;
+    }
+    // resolve conversion symbol
+    priv->npp.nv12_to_rgba = dlsym(priv->npp.lib, "nppiNV12ToRGBA_8u_P2C4R");
+    // handle missing symbol
+    if (!priv->npp.nv12_to_rgba) {
+        MP_ERR(f, "vsr: npp convert symbol missing\n");
+        return 0;
+    }
+    priv->npp_ready = 1;
+    return 1;
+}
+
+// upscale device rgba buffer and wrap result as output frame
+// mutates frame payload on success, returns zero on success
+static int vsr_run_and_wrap(struct mp_filter *f, struct priv *priv,
+    struct mp_frame *frame, struct mp_image *img, unsigned long long dev_src) {
+    // derive frame dimensions
+    int w = img->w;
+    int h = img->h;
+    // run neural upscale on device
+    if (priv->api.upscale(priv->session, dev_src, (unsigned)w, (unsigned)h, priv->dev_out)) {
+        return 1;
+    }
+    priv->cuda.ctx_sync();
+    // download upscaled frame reusing host scratch buffer
+    int ow = priv->out_w;
+    int oh = priv->out_h;
+    priv->cuda.cpy_dtoh(priv->host_tmp, priv->dev_out, (size_t)ow * oh * 4u);
+    priv->cuda.ctx_sync();
+    // allocate output image at upscaled size
+    struct mp_image *out = mp_image_alloc(IMGFMT_RGB24, ow, oh);
+    // handle allocation failure
+    if (!out) {
+        return 1;
+    }
+    // copy color metadata from input
+    out->params = img->params;
+    out->params.w = ow;
+    out->params.h = oh;
+    // unpack rgba rows back to rgb24
+    for (int y = 0; y < oh; y++) {
+        // copy rgb channels skipping alpha
+        unsigned char *src_row = priv->host_tmp + (size_t)y * ow * 4u;
+        unsigned char *dst = out->planes[0] + (size_t)y * out->stride[0];
+        for (int x = 0; x < ow; x++) {
+            dst[x * 3u + 0] = src_row[x * 4u + 0];
+            dst[x * 3u + 1] = src_row[x * 4u + 1];
+            dst[x * 3u + 2] = src_row[x * 4u + 2];
+        }
+    }
+    // replace frame payload with upscaled image
+    talloc_free(frame->data);
+    frame->data = out;
+    return 0;
+}
+
+// process cuda frame fully on device without cpu roundtrip
+static void vsr_cuda_frame(struct mp_filter *f, struct priv *priv, struct mp_frame frame) {
+    struct mp_image *img = frame.data;
+    int w = img->w;
+    int h = img->h;
+    // ensure backend ready for this size
+    if (!vsr_backend_ensure(f, priv, w, h)) {
+        mp_pin_in_write(f->ppins[1], frame);
+        return;
+    }
+    // ensure npp converter ready
+    if (!vsr_npp_open(f, priv)) {
+        mp_pin_in_write(f->ppins[1], frame);
+        return;
+    }
+    // map frame into av frame for device pointers
+    AVFrame *av = mp_image_to_av_frame(img);
+    // handle mapping failure
+    if (!av || !av->data[0] || !av->data[1]) {
+        if (av) {
+            av_frame_free(&av);
+        }
+        mp_pin_in_write(f->ppins[1], frame);
+        return;
+    }
+    // grow rgba scratch buffer when too small
+    size_t need_rgba = (size_t)w * h * 4u;
+    if (need_rgba > priv->rgba_cap) {
+        // release old scratch buffer
+        if (priv->dev_rgba) {
+            priv->cuda.mem_free(priv->dev_rgba);
+            priv->dev_rgba = 0;
+        }
+        // allocate tight rgba buffer
+        if (priv->cuda.mem_alloc(&priv->dev_rgba, need_rgba)) {
+            av_frame_free(&av);
+            mp_pin_in_write(f->ppins[1], frame);
+            return;
+        }
+        priv->rgba_cap = need_rgba;
+    }
+    // convert nv12 planes to packed rgba on device
+    const unsigned char *src[2] = {av->data[0], av->data[1]};
+    struct vsr_nppi_size roi = {w, h};
+    int npp_status = priv->npp.nv12_to_rgba(src, av->linesize[0],
+        (unsigned char *)(size_t)priv->dev_rgba, w * 4, roi);
+    // release av frame mapping
+    av_frame_free(&av);
+    // handle conversion failure
+    if (npp_status) {
+        mp_pin_in_write(f->ppins[1], frame);
+        return;
+    }
+    // point session input at converted buffer with tight pitch
+    // run shared upscale and wrap tail
+    if (vsr_run_and_wrap(f, priv, &frame, img, priv->dev_rgba)) {
+        mp_pin_in_write(f->ppins[1], frame);
+        return;
+    }
+    // forward upscaled frame downstream
+    mp_pin_in_write(f->ppins[1], frame);
 }
 
 // ensure backend session ready, init once and reconfigure on size change
@@ -209,8 +357,11 @@ static void vf_vsr_process(struct mp_filter *f) {
     // pull upstream frames into converter
     if (mp_pin_can_transfer_data(priv->conv->f->pins[0], f->ppins[0])) {
         struct mp_frame frame = mp_pin_out_read(f->ppins[0]);
-        // download hardware frames to system memory first
-        if (frame.type == MP_FRAME_VIDEO) {
+        // route cuda frames to zero-copy device path
+        if (frame.type == MP_FRAME_VIDEO && frame.data
+            && ((struct mp_image *)frame.data)->imgfmt == IMGFMT_CUDA) {
+            vsr_cuda_frame(f, priv, frame);
+        } else if (frame.type == MP_FRAME_VIDEO) {
             struct mp_image *img = frame.data;
             if (img && IMGFMT_IS_HWACCEL(img->imgfmt)) {
                 // copy hw surface into sw image
@@ -268,42 +419,11 @@ static void vf_vsr_process(struct mp_filter *f) {
     }
     // upload frame to device
     priv->cuda.cpy_htod(priv->dev_in, priv->host_tmp, (size_t)w * h * 4u);
-    // run neural upscale on device
-    if (priv->api.upscale(priv->session, priv->dev_in, (unsigned)w, (unsigned)h, priv->dev_out)) {
+    // run shared upscale and wrap tail
+    if (vsr_run_and_wrap(f, priv, &frame, img, priv->dev_in)) {
         mp_pin_in_write(f->ppins[1], frame);
         return;
     }
-    priv->cuda.ctx_sync();
-    // download upscaled frame
-    int ow = priv->out_w;
-    int oh = priv->out_h;
-    priv->cuda.cpy_dtoh(priv->host_tmp, priv->dev_out, (size_t)ow * oh * 4u);
-    priv->cuda.ctx_sync();
-    // allocate output image at upscaled size
-    struct mp_image *out = mp_image_alloc(IMGFMT_RGB24, ow, oh);
-    // handle allocation failure
-    if (!out) {
-        mp_pin_in_write(f->ppins[1], frame);
-        return;
-    }
-    // copy color metadata from input
-    out->params = img->params;
-    out->params.w = ow;
-    out->params.h = oh;
-    // unpack rgba rows back to rgb24
-    for (int y = 0; y < oh; y++) {
-        // copy rgb channels skipping alpha
-        unsigned char *src = priv->host_tmp + (size_t)y * ow * 4u;
-        unsigned char *dst = out->planes[0] + (size_t)y * out->stride[0];
-        for (int x = 0; x < ow; x++) {
-            dst[x * 3u + 0] = src[x * 4u + 0];
-            dst[x * 3u + 1] = src[x * 4u + 1];
-            dst[x * 3u + 2] = src[x * 4u + 2];
-        }
-    }
-    // replace frame payload with upscaled image
-    talloc_free(frame.data);
-    frame.data = out;
     // forward upscaled frame downstream
     mp_pin_in_write(f->ppins[1], frame);
 }
@@ -332,12 +452,19 @@ static void vf_vsr_destroy(struct mp_filter *f) {
         if (priv->dev_out) {
             priv->cuda.mem_free(priv->dev_out);
         }
+        if (priv->dev_rgba) {
+            priv->cuda.mem_free(priv->dev_rgba);
+        }
         if (priv->cuda_ctx) {
             priv->cuda.ctx_destroy(priv->cuda_ctx);
         }
         if (priv->cuda.lib) {
             dlclose(priv->cuda.lib);
         }
+    }
+    // unload npp converter library
+    if (priv->npp.lib) {
+        dlclose(priv->npp.lib);
     }
     // release host scratch buffer
     free(priv->host_tmp);
@@ -362,6 +489,7 @@ static struct mp_filter *vf_vsr_create(struct mp_filter *parent, void *options) 
     }
     // bind options block
     struct priv *priv = f->priv;
+    memset(priv, 0, sizeof(*priv));
     struct vf_vsr_opts *opts = talloc_steal(priv, options);
     priv->quality = opts->quality;
     priv->scale = opts->scale;
