@@ -14,7 +14,7 @@ void test_config_defaults(void) {
     // assert defaults are set as expected
     assert(cfg.enabled == true);
     assert(cfg.debug == true);
-    assert(fabsf(cfg.sharpness - 0.22f) < 0.001f);
+    assert(fabsf(cfg.sharpness - 0.15f) < 0.001f);
     // assert watermark defaults
     assert(cfg.watermark_enabled == true);
     assert(fabsf(cfg.watermark_opacity - 0.45f) < 0.001f);
@@ -67,7 +67,7 @@ void test_config_invalid_env(void) {
     vsr_config_t cfg;
     vsr_config_load(&cfg);
     // assert fallback to safe defaults
-    assert(fabsf(cfg.sharpness - 0.22f) < 0.001f);
+    assert(fabsf(cfg.sharpness - 0.15f) < 0.001f);
     assert(cfg.enabled == true);
     assert(strcmp(cfg.mode, "cas") == 0);
     // clean up environment
