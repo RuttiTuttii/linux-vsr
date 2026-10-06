@@ -147,6 +147,11 @@ static int vsr_cuda_open(struct vsr_cuda *cuda) {
     return 1;
 }
 
+// forward declarations for helpers defined below
+static int vsr_backend_ensure(struct mp_filter *f, struct priv *priv, int w, int h);
+static int vsr_run_and_wrap(struct mp_filter *f, struct priv *priv,
+    struct mp_frame *frame, struct mp_image *img, unsigned long long dev_src);
+
 // load npp color conversion entry point once
 static int vsr_npp_open(struct mp_filter *f, struct priv *priv) {
     // skip when already resolved
