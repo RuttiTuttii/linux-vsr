@@ -160,15 +160,15 @@ def main():
         print("browser agent not reachable", file=sys.stderr)
         return 2
     print(f"attached to browser on port {args.port}")
-    # install intercept for video hosts
+    # install intercept for all https traffic, daemon filters video hosts
     bidi.cmd(
         "network.addIntercept",
         {
             "phases": ["beforeRequestSent"],
-            "urlPatterns": [{"type": "string", "pattern": "googlevideo.com/"}],
+            "urlPatterns": [{"type": "string", "pattern": "https://"}],
         },
     )
-    print("intercept active for googlevideo")
+    print("intercept active, filtering googlevideo in daemon")
     # subscribe to interception events
     bidi.cmd("session.subscribe", {"events": ["network.beforeRequestSent"]})
     print("relay running, dry_run=", args.dry_run)
@@ -194,8 +194,8 @@ def main():
         for h in request.get("headers", []):
             if isinstance(h.get("value"), dict):
                 req_headers[h["name"]] = h["value"]["value"]
-        # passthrough non-video urls instantly
-        if not is_video_url(url):
+        # passthrough anything outside video hosts instantly
+        if "googlevideo" not in url or not is_video_url(url):
             try:
                 bidi.cmd("network.continueRequest", {"request": rid})
             except Exception:
