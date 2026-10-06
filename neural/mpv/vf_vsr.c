@@ -14,6 +14,7 @@
 #include "filters/user_filters.h"
 #include "video/img_format.h"
 #include "video/mp_image.h"
+#include "video/mp_image_pool.h"
 
 #include "options/m_option.h"
 
@@ -208,7 +209,26 @@ static void vf_vsr_process(struct mp_filter *f) {
     // pull upstream frames into converter
     if (mp_pin_can_transfer_data(priv->conv->f->pins[0], f->ppins[0])) {
         struct mp_frame frame = mp_pin_out_read(f->ppins[0]);
-        mp_pin_in_write(priv->conv->f->pins[0], frame);
+        // download hardware frames to system memory first
+        if (frame.type == MP_FRAME_VIDEO) {
+            struct mp_image *img = frame.data;
+            if (img && IMGFMT_IS_HWACCEL(img->imgfmt)) {
+                // copy hw surface into sw image
+                struct mp_image *sw = mp_image_hw_download(img, NULL);
+                // forward original when download fails
+                if (!sw) {
+                    mp_pin_in_write(priv->conv->f->pins[0], frame);
+                } else {
+                    talloc_free(frame.data);
+                    frame.data = sw;
+                    mp_pin_in_write(priv->conv->f->pins[0], frame);
+                }
+            } else {
+                mp_pin_in_write(priv->conv->f->pins[0], frame);
+            }
+        } else {
+            mp_pin_in_write(priv->conv->f->pins[0], frame);
+        }
     }
     // handle converted frames from converter
     if (!mp_pin_can_transfer_data(f->ppins[1], priv->conv->f->pins[1])) {
