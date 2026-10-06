@@ -145,9 +145,20 @@ def main():
     # transcoded segment cache keyed by full url
     seg_cache = {}
 
-    # connect and open session
-    bidi = Bidi("127.0.0.1", args.port, "/session")
-    bidi.cmd("session.new", {"capabilities": {}})
+    # connect with retries until browser agent ready
+    bidi = None
+    for attempt in range(30):
+        try:
+            candidate = Bidi("127.0.0.1", args.port, "/session")
+            candidate.cmd("session.new", {"capabilities": {}})
+            bidi = candidate
+            break
+        except Exception as ex:
+            print(f"attach try {attempt + 1}: {str(ex)[:80]}")
+            time.sleep(2)
+    if not bidi:
+        print("browser agent not reachable", file=sys.stderr)
+        return 2
     print(f"attached to browser on port {args.port}")
     # install intercept for video hosts
     bidi.cmd(
