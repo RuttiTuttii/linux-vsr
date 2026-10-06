@@ -379,7 +379,7 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
     // snapshot configuration for this call
     bool enabled = false;
     char mode[VSR_MAX_MODE_LEN] = {0};
-    float sharpness = 0.22f;
+    float sharpness = 0.15f;
     bool watermark = false;
     float opacity = 0.45f;
     float size_frac = 0.06f;

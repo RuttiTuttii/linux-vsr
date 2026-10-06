@@ -187,7 +187,7 @@ all unit tests completed successfully
 |---|---|---|
 | `enable` / `VSR_ENABLE` | `1` | включение (`1`) или отключение (`0`) обработки |
 | `mode` / `VSR_MODE` | `cas` | алгоритм апскейла (`cas`, `easu`, `off`) |
-| `sharpness` / `VSR_SHARPNESS` | `0.22` | сила адаптивной резкости (от `0.0` до `0.50`) |
+| `sharpness` / `VSR_SHARPNESS` | `0.15` | сила адаптивной резкости (от `0.0` до `0.50`) |
 | `debug` / `VSR_DEBUG` | `1` | вывод отладочных сообщений в stderr |
 | `watermark` / `VSR_WATERMARK` | `1` | отображение полосатого индикатора в углу видео |
 | `watermark_opacity` / `VSR_WATERMARK_OPACITY` | `0.45` | прозрачность индикатора (от `0.05` до `1.0`) |

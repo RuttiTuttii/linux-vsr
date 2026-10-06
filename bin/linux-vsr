@@ -28,7 +28,7 @@ if [ ! -f "${cfg_file}" ]; then
 # linux-vsr configuration
 enable=1
 debug=1
-sharpness=0.22
+sharpness=0.15
 mode=cas
 watermark=1
 watermark_opacity=0.45
@@ -113,7 +113,7 @@ cmd_launch() {
     export MOZ_DISABLE_AUTO_SAFE_MODE=1
     export NVD_BACKEND="${NVD_BACKEND:-direct}"
     # configure vsr tuning options with safe defaults
-    export VSR_SHARPNESS="${VSR_SHARPNESS:-0.22}"
+    export VSR_SHARPNESS="${VSR_SHARPNESS:-0.15}"
     export VSR_DEBUG="${VSR_DEBUG:-1}"
     export VSR_ENABLE="${VSR_ENABLE:-1}"
     export VSR_MODE="${VSR_MODE:-cas}"

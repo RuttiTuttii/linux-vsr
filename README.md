@@ -186,7 +186,7 @@ settings are stored in `~/.config/linux-vsr/config.ini` and can also be overridd
 |---|---|---|
 | `enable` / `VSR_ENABLE` | `1` | toggle upscaling (`1` to enable, `0` to bypass) |
 | `mode` / `VSR_MODE` | `cas` | upscaler algorithm (`cas`, `easu`, `off`) |
-| `sharpness` / `VSR_SHARPNESS` | `0.22` | adaptive sharpening strength (`0.0` to `0.50`) |
+| `sharpness` / `VSR_SHARPNESS` | `0.15` | adaptive sharpening strength (`0.0` to `0.50`) |
 | `debug` / `VSR_DEBUG` | `1` | output diagnostic messages to stderr |
 | `watermark` / `VSR_WATERMARK` | `1` | display corner badge verification indicator |
 | `watermark_opacity` / `VSR_WATERMARK_OPACITY` | `0.45` | opacity of corner indicator (`0.05` to `1.0`) |

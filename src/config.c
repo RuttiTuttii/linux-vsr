@@ -27,7 +27,7 @@ void vsr_config_init_defaults(vsr_config_t *cfg) {
     // enable diagnostic logging by default
     cfg->debug = true;
     // set balanced default sharpness level
-    cfg->sharpness = 0.22f;
+    cfg->sharpness = 0.15f;
     // enable watermark indicator by default
     cfg->watermark_enabled = true;
     // set semi-transparent default opacity
