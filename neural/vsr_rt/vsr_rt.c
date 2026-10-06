@@ -13,6 +13,7 @@
 // pixel geometry constants from maxine nvcvimage api
 #define VSR_NVCV_RGBA 6
 #define VSR_NVCV_F32 7
+#define VSR_NVCV_U8 1
 #define VSR_NVCV_RGB 4
 #define VSR_NVCV_CHUNKY 0
 #define VSR_NVCV_PLANAR 1
@@ -64,6 +65,7 @@ typedef struct {
     int (*stream_destroy)(vsr_cu_stream_t);
     int (*img_alloc)(vsr_nvcv_image_t *, unsigned, unsigned, int, int, unsigned, unsigned, unsigned);
     int (*img_free)(vsr_nvcv_image_t *);
+    int (*img_realloc)(vsr_nvcv_image_t *, unsigned, unsigned, int, int, unsigned, unsigned, unsigned);
     const char *(*err_str)(int);
 } vsr_host_api_t;
 
@@ -81,6 +83,12 @@ struct vsr_rt_session {
     int quality;
     unsigned out_w;
     unsigned out_h;
+    int in_format;
+    int in_type;
+    unsigned in_layout;
+    int out_format;
+    int out_type;
+    unsigned out_layout;
     char sdk_path[1024];
 };
 
@@ -190,7 +198,7 @@ vsr_rt_status_t vsr_rt_init(vsr_rt_session_t **out, int quality) {
         return VSR_RT_ERR_SDK_NOT_FOUND;
     }
     // remember path for diagnostics
-    strncpy(g_sdk_path, session->sdk_path, sizeof(g_sdk_path) - 1);
+    snprintf(g_sdk_path, sizeof(g_sdk_path), "%s", session->sdk_path);
     // resolve required entry points
     vsr_host_api_t *api = &session->api;
     int ok = 1;
@@ -203,6 +211,8 @@ vsr_rt_status_t vsr_rt_init(vsr_rt_session_t **out, int quality) {
     ok &= vsr_resolve_one(session->sdk_handle, (void **)&api->run, "NvVFX_Run");
     ok &= vsr_resolve_one(session->sdk_handle, (void **)&api->img_alloc, "NvCVImage_Alloc");
     ok &= vsr_resolve_one(session->sdk_handle, (void **)&api->img_free, "NvCVImage_Dealloc");
+    // optional realloc helper for per-size input descriptors
+    vsr_resolve_one(session->sdk_handle, (void **)&api->img_realloc, "NvCVImage_Realloc");
     // optional symbols resolve best effort
     vsr_resolve_one(session->sdk_handle, (void **)&api->set_stream, "NvVFX_SetCudaStream");
     vsr_resolve_one(session->sdk_handle, (void **)&api->stream_create, "NvVFX_CudaStreamCreate");
@@ -245,15 +255,24 @@ vsr_rt_status_t vsr_rt_init(vsr_rt_session_t **out, int quality) {
     return VSR_RT_OK;
 }
 
-// candidate input geometries to probe in order
+// candidate image geometries to probe in order
 static const struct {
     int format;
     int type;
     unsigned layout;
-} vsr_in_candidates[] = {
-    { VSR_NVCV_RGBA, VSR_NVCV_F32, VSR_NVCV_CHUNKY },
+} vsr_geo_candidates[] = {
     { VSR_NVCV_RGB, VSR_NVCV_F32, VSR_NVCV_PLANAR },
+    { VSR_NVCV_RGBA, VSR_NVCV_F32, VSR_NVCV_CHUNKY },
+    { VSR_NVCV_RGB, VSR_NVCV_U8, VSR_NVCV_PLANAR },
+    { VSR_NVCV_RGBA, VSR_NVCV_U8, VSR_NVCV_CHUNKY },
 };
+
+// debug flag for sdk status tracing
+static int vsr_debug_enabled(void) {
+    // read env once per call, cheap enough for init paths
+    const char *env = getenv("VSR_RT_DEBUG");
+    return env && (env[0] == '1' || env[0] == 'y');
+}
 
 // configure output size and load models into vram (slow once)
 vsr_rt_status_t vsr_rt_load(vsr_rt_session_t *session, unsigned out_w, unsigned out_h) {
@@ -273,36 +292,79 @@ vsr_rt_status_t vsr_rt_load(vsr_rt_session_t *session, unsigned out_w, unsigned 
         session->has_in = 0;
     }
     session->loaded = 0;
-    // allocate output image at target size
-    int status = session->api.img_alloc(&session->img_out, out_w, out_h,
-        VSR_NVCV_RGBA, VSR_NVCV_F32, VSR_NVCV_CHUNKY, VSR_NVCV_GPU, 1);
-    // handle allocation failure
-    if (status != VSR_NVCV_SUCCESS) {
-        return VSR_RT_ERR_CUDA;
-    }
-    session->has_out = 1;
-    // bind output image to effect
-    status = session->api.set_image(session->effect, VSR_PARAM_OUT, &session->img_out);
-    // handle rejected output binding
-    if (status != VSR_NVCV_SUCCESS) {
-        return VSR_RT_ERR_GEOMETRY;
-    }
-    // probe input geometries until binding accepted
-    int bound = 0;
-    for (size_t i = 0; i < sizeof(vsr_in_candidates) / sizeof(vsr_in_candidates[0]); i++) {
-        // use output dims as probe size, real dims set per run
-        status = session->api.img_alloc(&session->img_in, out_w, out_h,
-            vsr_in_candidates[i].format, vsr_in_candidates[i].type,
-            vsr_in_candidates[i].layout, VSR_NVCV_GPU, 1);
+    // probe output geometries until binding accepted
+    int out_ok = 0;
+    int status = 0;
+    for (size_t i = 0; i < sizeof(vsr_geo_candidates) / sizeof(vsr_geo_candidates[0]); i++) {
+        // allocate output image at target size
+        status = session->api.img_alloc(&session->img_out, out_w, out_h,
+            vsr_geo_candidates[i].format, vsr_geo_candidates[i].type,
+            vsr_geo_candidates[i].layout, VSR_NVCV_GPU, 1);
         // skip failed allocations
         if (status != VSR_NVCV_SUCCESS) {
+            if (vsr_debug_enabled()) {
+                fprintf(stderr, "[vsr_rt] out probe %zu alloc failed: %d\n", i, status);
+            }
+            continue;
+        }
+        // try binding candidate to effect
+        status = session->api.set_image(session->effect, VSR_PARAM_OUT, &session->img_out);
+        // report probe result
+        if (vsr_debug_enabled()) {
+            fprintf(stderr, "[vsr_rt] out probe %zu bind: %d\n", i, status);
+        }
+        // keep first accepted geometry
+        if (status == VSR_NVCV_SUCCESS) {
+            session->has_out = 1;
+            session->out_format = vsr_geo_candidates[i].format;
+            session->out_type = vsr_geo_candidates[i].type;
+            session->out_layout = vsr_geo_candidates[i].layout;
+            out_ok = 1;
+            break;
+        }
+        // release rejected candidate
+        session->api.img_free(&session->img_out);
+        memset(&session->img_out, 0, sizeof(session->img_out));
+    }
+    // handle no accepted output geometry
+    if (!out_ok) {
+        return VSR_RT_ERR_GEOMETRY;
+    }
+    // load models into vram, slow on first call
+    status = session->api.load(session->effect);
+    // handle load failure
+    if (status != VSR_NVCV_SUCCESS) {
+        if (vsr_debug_enabled()) {
+            fprintf(stderr, "[vsr_rt] load failed: %d\n", status);
+        }
+        return VSR_RT_ERR_LOAD;
+    }
+    // probe input geometries after load, mirrors wrapper call order
+    int bound = 0;
+    for (size_t i = 0; i < sizeof(vsr_geo_candidates) / sizeof(vsr_geo_candidates[0]); i++) {
+        // use output dims as probe size, real dims set per run
+        status = session->api.img_alloc(&session->img_in, out_w, out_h,
+            vsr_geo_candidates[i].format, vsr_geo_candidates[i].type,
+            vsr_geo_candidates[i].layout, VSR_NVCV_GPU, 1);
+        // skip failed allocations
+        if (status != VSR_NVCV_SUCCESS) {
+            if (vsr_debug_enabled()) {
+                fprintf(stderr, "[vsr_rt] probe %zu alloc failed: %d\n", i, status);
+            }
             continue;
         }
         // try binding candidate to effect
         status = session->api.set_image(session->effect, VSR_PARAM_IN, &session->img_in);
+        // report probe result
+        if (vsr_debug_enabled()) {
+            fprintf(stderr, "[vsr_rt] probe %zu bind: %d\n", i, status);
+        }
         // keep first accepted geometry
         if (status == VSR_NVCV_SUCCESS) {
             session->has_in = 1;
+            session->in_format = vsr_geo_candidates[i].format;
+            session->in_type = vsr_geo_candidates[i].type;
+            session->in_layout = vsr_geo_candidates[i].layout;
             bound = 1;
             break;
         }
@@ -314,17 +376,29 @@ vsr_rt_status_t vsr_rt_load(vsr_rt_session_t *session, unsigned out_w, unsigned 
     if (!bound) {
         return VSR_RT_ERR_GEOMETRY;
     }
-    // load models into vram, slow on first call
-    status = session->api.load(session->effect);
-    // handle load failure
-    if (status != VSR_NVCV_SUCCESS) {
-        return VSR_RT_ERR_LOAD;
-    }
     // store dimensions and mark ready
     session->out_w = out_w;
     session->out_h = out_h;
     session->loaded = 1;
     return VSR_RT_OK;
+}
+
+// ensure input descriptor matches frame size, realloc when changed
+static int vsr_fit_input(vsr_rt_session_t *session, unsigned w, unsigned h) {
+    // reuse descriptor when size already matches
+    if (session->img_in.width == w && session->img_in.height == h) {
+        return VSR_NVCV_SUCCESS;
+    }
+    // prefer realloc helper when available
+    if (session->api.img_realloc) {
+        return session->api.img_realloc(&session->img_in, w, h,
+            session->in_format, session->in_type, session->in_layout, VSR_NVCV_GPU, 1);
+    }
+    // fall back to free plus alloc cycle
+    session->api.img_free(&session->img_in);
+    memset(&session->img_in, 0, sizeof(session->img_in));
+    return session->api.img_alloc(&session->img_in, w, h,
+        session->in_format, session->in_type, session->in_layout, VSR_NVCV_GPU, 1);
 }
 
 // upscale one rgba f32 frame, device pointers stay on gpu, no copies inside
@@ -338,12 +412,16 @@ vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
     if (!dev_in || !dev_out || in_w == 0 || in_h == 0) {
         return VSR_RT_ERR_ARGS;
     }
+    // fit input descriptor to frame size
+    int status = vsr_fit_input(session, in_w, in_h);
+    // handle fit failure
+    if (status != VSR_NVCV_SUCCESS) {
+        return VSR_RT_ERR_RUN;
+    }
     // point input descriptor at caller buffer without copying
-    session->img_in.width = in_w;
-    session->img_in.height = in_h;
     session->img_in.pixels = (void *)(size_t)dev_in;
     // bind input descriptor for this frame size
-    int status = session->api.set_image(session->effect, VSR_PARAM_IN, &session->img_in);
+    status = session->api.set_image(session->effect, VSR_PARAM_IN, &session->img_in);
     // handle rejected input binding
     if (status != VSR_NVCV_SUCCESS) {
         return VSR_RT_ERR_RUN;
@@ -360,9 +438,50 @@ vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
     status = session->api.run(session->effect, 0);
     // handle inference failure
     if (status != VSR_NVCV_SUCCESS) {
+        // report sdk code when tracing enabled
+        const char *dbg = getenv("VSR_RT_DEBUG");
+        if (dbg && (dbg[0] == '1' || dbg[0] == 'y')) {
+            fprintf(stderr, "[vsr_rt] run failed: %d\n", status);
+        }
         return VSR_RT_ERR_RUN;
     }
     return VSR_RT_OK;
+}
+
+// report negotiated input geometry for caller buffer layout
+void vsr_rt_in_geometry(const vsr_rt_session_t *session, int *format, int *type, unsigned *layout) {
+    // handle null session gracefully
+    if (!session) {
+        return;
+    }
+    // copy negotiated values when slots provided
+    if (format) {
+        *format = session->in_format;
+    }
+    if (type) {
+        *type = session->in_type;
+    }
+    if (layout) {
+        *layout = session->in_layout;
+    }
+}
+
+// report negotiated output geometry for caller buffer layout
+void vsr_rt_out_geometry(const vsr_rt_session_t *session, int *format, int *type, unsigned *layout) {
+    // handle null session gracefully
+    if (!session) {
+        return;
+    }
+    // copy negotiated values when slots provided
+    if (format) {
+        *format = session->out_format;
+    }
+    if (type) {
+        *type = session->out_type;
+    }
+    if (layout) {
+        *layout = session->out_layout;
+    }
 }
 
 // release session and sdk handles

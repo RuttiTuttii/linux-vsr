@@ -50,8 +50,8 @@ static double vsr_now_ms(void) {
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
 
-// fill host rgba f32 test pattern with edges and bars
-static void vsr_fill_pattern(float *host, unsigned w, unsigned h) {
+// fill host rgba u8 test pattern with edges and bars
+static void vsr_fill_pattern(unsigned char *host, unsigned w, unsigned h) {
     // iterate rows and columns
     for (unsigned y = 0; y < h; y++) {
         for (unsigned x = 0; x < w; x++) {
@@ -62,16 +62,16 @@ static void vsr_fill_pattern(float *host, unsigned w, unsigned h) {
             float bx = fx * 8.0f - (float)(int)(fx * 8.0f);
             float by = fy * 8.0f - (float)(int)(fy * 8.0f);
             size_t idx = ((size_t)y * w + x) * 4u;
-            host[idx + 0] = fx;
-            host[idx + 1] = fy;
-            host[idx + 2] = (bx + by) * 0.5f;
-            host[idx + 3] = 1.0f;
+            host[idx + 0] = (unsigned char)(fx * 255.0f + 0.5f);
+            host[idx + 1] = (unsigned char)(fy * 255.0f + 0.5f);
+            host[idx + 2] = (unsigned char)((bx + by) * 0.5f * 255.0f + 0.5f);
+            host[idx + 3] = 255;
         }
     }
 }
 
-// write float rgba buffer as binary ppm for visual check
-static int vsr_write_ppm(const char *path, const float *host, unsigned w, unsigned h) {
+// write rgba u8 buffer as binary ppm for visual check
+static int vsr_write_ppm(const char *path, const unsigned char *host, unsigned w, unsigned h) {
     // open output file
     FILE *fp = fopen(path, "wb");
     // handle open failure
@@ -80,20 +80,9 @@ static int vsr_write_ppm(const char *path, const float *host, unsigned w, unsign
     }
     // write ppm header
     fprintf(fp, "P6\n%u %u\n255\n", w, h);
-    // convert rows to uint8 rgb
+    // convert pixels dropping alpha channel
     for (size_t i = 0; i < (size_t)w * h; i++) {
-        unsigned char px[3];
-        // clamp each channel into byte range
-        for (int c = 0; c < 3; c++) {
-            float v = host[i * 4u + (size_t)c];
-            if (v < 0.0f) {
-                v = 0.0f;
-            }
-            if (v > 1.0f) {
-                v = 1.0f;
-            }
-            px[c] = (unsigned char)(v * 255.0f + 0.5f);
-        }
+        unsigned char px[3] = {host[i * 4u], host[i * 4u + 1u], host[i * 4u + 2u]};
         fwrite(px, 1, 3, fp);
     }
     // close output file
@@ -146,28 +135,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "cuda init failed\n");
         return 3;
     }
-    // allocate host pattern buffer
-    float *host_in = (float *)malloc((size_t)w * h * 4u * sizeof(float));
-    float *host_out = (float *)malloc((size_t)ow * oh * 4u * sizeof(float));
-    // handle host allocation failure
-    if (!host_in || !host_out) {
-        fprintf(stderr, "host alloc failed\n");
-        return 4;
-    }
-    // fill test pattern
-    vsr_fill_pattern(host_in, w, h);
-    // allocate device buffers for input and output
-    unsigned long long dev_in = 0, dev_out = 0;
-    if (cuda.mem_alloc(&dev_in, (size_t)w * h * 4u * sizeof(float))
-        || cuda.mem_alloc(&dev_out, (size_t)ow * oh * 4u * sizeof(float))) {
-        fprintf(stderr, "device alloc failed\n");
-        return 4;
-    }
-    // upload pattern to device
-    if (cuda.cpy_htod(dev_in, host_in, (size_t)w * h * 4u * sizeof(float))) {
-        fprintf(stderr, "upload failed\n");
-        return 4;
-    }
     // init neural session at high quality
     vsr_rt_session_t *session = NULL;
     vsr_rt_status_t status = vsr_rt_init(&session, VSR_RT_HIGH);
@@ -185,6 +152,45 @@ int main(int argc, char **argv) {
         fprintf(stderr, "vsr_rt_load: %s\n", vsr_rt_strerror(status));
         vsr_rt_destroy(session);
         return 5;
+    }
+    // query negotiated buffer layouts
+    int in_format = 0, in_type = 0, out_format = 0, out_type = 0;
+    unsigned in_layout = 0, out_layout = 0;
+    vsr_rt_in_geometry(session, &in_format, &in_type, &in_layout);
+    vsr_rt_out_geometry(session, &out_format, &out_type, &out_layout);
+    // support chunky rgba u8 buffers negotiated by effect
+    if (in_format != 6 || in_type != 1 || in_layout != 0 || out_format != 6 || out_type != 1 || out_layout != 0) {
+        fprintf(stderr, "unsupported geometry in=%d/%d/%u out=%d/%d/%u\n",
+            in_format, in_type, in_layout, out_format, out_type, out_layout);
+        vsr_rt_destroy(session);
+        return 5;
+    }
+    // report negotiated geometry
+    printf("geometry in=chunky-rgba-u8 out=chunky-rgba-u8\n");
+    // allocate host pattern buffers
+    unsigned char *host_in = (unsigned char *)malloc((size_t)w * h * 4u);
+    unsigned char *host_out = (unsigned char *)malloc((size_t)ow * oh * 4u);
+    // handle host allocation failure
+    if (!host_in || !host_out) {
+        fprintf(stderr, "host alloc failed\n");
+        vsr_rt_destroy(session);
+        return 4;
+    }
+    // fill test pattern
+    vsr_fill_pattern(host_in, w, h);
+    // allocate device buffers for input and output
+    unsigned long long dev_in = 0, dev_out = 0;
+    if (cuda.mem_alloc(&dev_in, (size_t)w * h * 4u)
+        || cuda.mem_alloc(&dev_out, (size_t)ow * oh * 4u)) {
+        fprintf(stderr, "device alloc failed\n");
+        vsr_rt_destroy(session);
+        return 4;
+    }
+    // upload pattern to device
+    if (cuda.cpy_htod(dev_in, host_in, (size_t)w * h * 4u)) {
+        fprintf(stderr, "upload failed\n");
+        vsr_rt_destroy(session);
+        return 4;
     }
     // warm up once outside timing
     status = vsr_rt_upscale(session, dev_in, w, h, dev_out);
@@ -213,7 +219,7 @@ int main(int argc, char **argv) {
         return 6;
     }
     // download final frame for visual check
-    cuda.cpy_dtoh(host_out, dev_out, (size_t)ow * oh * 4u * sizeof(float));
+    cuda.cpy_dtoh(host_out, dev_out, (size_t)ow * oh * 4u);
     cuda.ctx_sync();
     // write output image
     vsr_write_ppm("/tmp/vsr_rt_out.ppm", host_out, ow, oh);

@@ -18,7 +18,18 @@ TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%.o, $(TEST_SOURCES))
 # modules needed for tests (excluding hook and main which intercept symbols)
 CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o $(BUILDDIR)/safety.o
 
-.PHONY: all clean test
+.PHONY: all clean test test-neural neural-rt
+
+neural-rt: $(BUILDDIR)/vsr_rt_bench $(BUILDDIR)/vsr_rt_test
+
+$(BUILDDIR)/vsr_rt_bench: neural/vsr_rt/vsr_rt.c neural/vsr_rt/bench_rt.c | $(BUILDDIR)
+	$(CC) -O2 -Wall -Wextra -Werror -I neural/vsr_rt -fstack-protector-strong -D_FORTIFY_SOURCE=2 -o $@ $^ -ldl -lm
+
+$(BUILDDIR)/vsr_rt_test: neural/vsr_rt/vsr_rt.c neural/vsr_rt/test_rt.c | $(BUILDDIR)
+	$(CC) -O2 -Wall -Wextra -Werror -I neural/vsr_rt -fstack-protector-strong -D_FORTIFY_SOURCE=2 -o $@ $^ -ldl -lm
+
+test-neural: $(BUILDDIR)/vsr_rt_test
+	./$(BUILDDIR)/vsr_rt_test
 
 all: $(LIB_TARGET)
 
