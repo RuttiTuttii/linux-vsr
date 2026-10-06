@@ -47,6 +47,11 @@ vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
     unsigned long long dev_in, unsigned in_w, unsigned in_h,
     unsigned long long dev_out);
 
+// upscale with explicit row pitches, zero means tightly packed
+vsr_rt_status_t vsr_rt_upscale_pitched(vsr_rt_session_t *session,
+    unsigned long long dev_in, unsigned in_w, unsigned in_h, unsigned in_pitch,
+    unsigned long long dev_out, unsigned out_pitch);
+
 // release session and sdk handles
 void vsr_rt_destroy(vsr_rt_session_t *session);
 

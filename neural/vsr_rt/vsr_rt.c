@@ -405,6 +405,14 @@ static int vsr_fit_input(vsr_rt_session_t *session, unsigned w, unsigned h) {
 vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
     unsigned long long dev_in, unsigned in_w, unsigned in_h,
     unsigned long long dev_out) {
+    // delegate to pitched variant with tight packing
+    return vsr_rt_upscale_pitched(session, dev_in, in_w, in_h, 0, dev_out, 0);
+}
+
+// upscale with explicit row pitches, zero means tightly packed
+vsr_rt_status_t vsr_rt_upscale_pitched(vsr_rt_session_t *session,
+    unsigned long long dev_in, unsigned in_w, unsigned in_h, unsigned in_pitch,
+    unsigned long long dev_out, unsigned out_pitch) {
     // validate session state and pointers
     if (!session || !session->effect || !session->loaded) {
         return VSR_RT_ERR_ARGS;
@@ -420,6 +428,10 @@ vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
     }
     // point input descriptor at caller buffer without copying
     session->img_in.pixels = (void *)(size_t)dev_in;
+    // apply caller pitch when provided
+    if (in_pitch) {
+        session->img_in.pitch = (int)in_pitch;
+    }
     // bind input descriptor for this frame size
     status = session->api.set_image(session->effect, VSR_PARAM_IN, &session->img_in);
     // handle rejected input binding
@@ -428,6 +440,10 @@ vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
     }
     // point output descriptor at caller buffer without copying
     session->img_out.pixels = (void *)(size_t)dev_out;
+    // apply caller pitch when provided
+    if (out_pitch) {
+        session->img_out.pitch = (int)out_pitch;
+    }
     // bind output descriptor for this frame
     status = session->api.set_image(session->effect, VSR_PARAM_OUT, &session->img_out);
     // handle rejected output binding
