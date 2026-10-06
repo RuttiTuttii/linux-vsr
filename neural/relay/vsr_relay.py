@@ -160,13 +160,10 @@ def main():
         print("browser agent not reachable", file=sys.stderr)
         return 2
     print(f"attached to browser on port {args.port}")
-    # install intercept for all https traffic, daemon filters video hosts
+    # install intercept for all requests, daemon filters video hosts
     bidi.cmd(
         "network.addIntercept",
-        {
-            "phases": ["beforeRequestSent"],
-            "urlPatterns": [{"type": "string", "pattern": "https://"}],
-        },
+        {"phases": ["beforeRequestSent"]},
     )
     print("intercept active, filtering googlevideo in daemon")
     # subscribe to interception events
