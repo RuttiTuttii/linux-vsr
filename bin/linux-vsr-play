@@ -51,4 +51,4 @@ format="bv[height<=${height}]+ba/b[height<=${height}]/b"
 
 # launch player with neural filter chain
 echo "[linux-vsr-play] ${url} height<=${height} quality=${quality}"
-exec "${mpv_bin}" --hwdec=no --vf="vsr:quality=${quality}:scale=2" --ytdl-format="${format}" "${url}"
+exec "${mpv_bin}" --hwdec=auto --vf="vsr:quality=${quality}:scale=2" --ytdl-format="${format}" "${url}"
