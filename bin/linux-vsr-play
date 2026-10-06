@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# linux-vsr-play: play url with neural vsr via overlay mpv build
+# usage: linux-vsr-play <url> [--height 720] [--quality 3]
+# picks bounded source height for realtime inference, larger input scales cost
+
+set -u
+
+# resolve repository directory
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# default overlay mpv location
+mpv_bin="${VSR_MPV_BIN:-/tmp/mpv-build/build/mpv}"
+
+# parse playback url
+url="${1:-}"
+if [ -z "${url}" ]; then
+    echo "usage: linux-vsr-play <url> [--height 720] [--quality 3]" >&2
+    exit 1
+fi
+shift || true
+
+# parse optional tunables
+height="720"
+quality="3"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --height) height="${2:-720}"; shift 2 || true ;;
+        --quality) quality="${2:-3}"; shift 2 || true ;;
+        *) shift || true ;;
+    esac
+done
+
+# fall back to system mpv with warning when overlay missing
+if [ ! -x "${mpv_bin}" ]; then
+    echo "[linux-vsr-play] overlay mpv missing, trying system mpv" >&2
+    mpv_bin="mpv"
+fi
+
+# point filter at neural runtime library
+export VSR_RT_LIB="${VSR_RT_LIB:-$script_dir/../build/libvsr_rt.so}"
+
+# point sdk loader at vfx libraries when venv present
+venv_libs="/tmp/vsr-neural/lib/python3.14/site-packages"
+if [ -d "${venv_libs}/nvvfx/libs" ]; then
+    export VSR_RT_SDK_DIR="${VSR_RT_SDK_DIR:-${venv_libs}/nvvfx/libs}"
+    export LD_LIBRARY_PATH="${venv_libs}/nvvfx/libs:${venv_libs}/nvidia_vfx.libs:${LD_LIBRARY_PATH:-}"
+fi
+
+# select bounded source height for realtime budget
+format="bv[height<=${height}]+ba/b[height<=${height}]/b"
+
+# launch player with neural filter chain
+echo "[linux-vsr-play] ${url} height<=${height} quality=${quality}"
+exec "${mpv_bin}" --hwdec=no --vf="vsr:quality=${quality}:scale=2" --ytdl-format="${format}" "${url}"
