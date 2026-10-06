@@ -50,4 +50,10 @@ vsr_rt_status_t vsr_rt_upscale(vsr_rt_session_t *session,
 // release session and sdk handles
 void vsr_rt_destroy(vsr_rt_session_t *session);
 
+// report negotiated input geometry for caller buffer layout
+void vsr_rt_in_geometry(const vsr_rt_session_t *session, int *format, int *type, unsigned *layout);
+
+// report negotiated output geometry for caller buffer layout
+void vsr_rt_out_geometry(const vsr_rt_session_t *session, int *format, int *type, unsigned *layout);
+
 #endif // VSR_RT_H
