@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# linux-vsr-relay-browser: launch persistent browser instance for relay runs
+# usage: linux-vsr-relay-browser [--port 9222]
+# uses stable profile so cookies and trust survive between runs,
+# log into youtube once inside this window on first launch
+
+set -u
+
+# parse debugging port
+port="${1:-9222}"
+if [ "${1:-}" = "--port" ]; then
+    port="${2:-9222}"
+fi
+
+# stable profile directory keeps trust cookies
+prof_dir="${XDG_CONFIG_HOME:-$HOME/.config}/linux-vsr/relay-profile"
+mkdir -p "${prof_dir}"
+
+# drop stale crash markers only, keep cookies and logins
+rm -rf "${prof_dir}/lock" "${prof_dir}/.parentlock" "${prof_dir}/crashes" \
+    "${prof_dir}/minidumps" "${prof_dir}/compatibility.ini"
+
+# resolve browser binary
+browser=""
+for candidate in /opt/zen-browser-bin/zen-bin zen-browser firefox; do
+    if [ -x "${candidate}" ]; then
+        browser="${candidate}"
+        break
+    fi
+    if command -v "${candidate}" &>/dev/null; then
+        browser="${candidate}"
+        break
+    fi
+done
+if [ -z "${browser}" ]; then
+    echo "[relay-browser] no browser found" >&2
+    exit 1
+fi
+
+# disable sandboxes so preload reaches render processes
+export MOZ_DISABLE_RDD_SANDBOX=1
+export MOZ_DISABLE_CONTENT_SANDBOX=1
+export MOZ_DISABLE_GPU_SANDBOX=1
+export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1
+export MOZ_DISABLE_GMP_SANDBOX=1
+export MOZ_DISABLE_UTILITY_SANDBOX=1
+export MOZ_CRASHREPORTER_DISABLE=1
+export MOZ_DISABLE_AUTO_SAFE_MODE=1
+
+# launch fresh instance with bidi port on stable profile
+echo "[relay-browser] profile: ${prof_dir}, bidi port: ${port}"
+echo "[relay-browser] log into youtube once on first launch to build trust"
+exec "${browser}" --new-instance --profile "${prof_dir}" --remote-debugging-port "${port}"
