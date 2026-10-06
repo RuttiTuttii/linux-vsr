@@ -20,6 +20,8 @@ CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patch
 
 .PHONY: all clean test test-neural neural-rt
 
+all: $(LIB_TARGET)
+
 neural-rt: $(BUILDDIR)/vsr_rt_bench $(BUILDDIR)/vsr_rt_test $(BUILDDIR)/libvsr_rt.so
 
 $(BUILDDIR)/libvsr_rt.so: neural/vsr_rt/vsr_rt.c | $(BUILDDIR)
@@ -34,7 +36,7 @@ $(BUILDDIR)/vsr_rt_test: neural/vsr_rt/vsr_rt.c neural/vsr_rt/test_rt.c | $(BUIL
 test-neural: $(BUILDDIR)/vsr_rt_test
 	./$(BUILDDIR)/vsr_rt_test
 
-all: $(LIB_TARGET)
+$(LIB_TARGET): $(OBJECTS)
 
 $(BUILDDIR):
 	mkdir -p $(BUILDDIR)
