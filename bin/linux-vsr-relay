@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# linux-vsr-relay: run neural segment relay daemon for browser tab
+# usage: linux-vsr-relay [--port 9222] [--scale 2] [--quality HIGH] [--dry-run]
+# needs zen started with --remote-debugging-port <port> first
+
+set -u
+
+# resolve repository directory
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# locate python venv with neural stack
+venv_py="${VSR_VENV_PY:-/tmp/vsr-neural/bin/python}"
+if [ ! -x "${venv_py}" ]; then
+    echo "[linux-vsr-relay] venv python missing at ${venv_py}" >&2
+    echo "install neural stack first, see neural/README.md" >&2
+    exit 1
+fi
+
+# derive sdk library paths from venv layout
+venv_dir="$(dirname "$(dirname "${venv_py}")")"
+site_dir="$(echo "${venv_dir}"/lib/python*/site-packages)"
+export VSR_RT_SDK_DIR="${VSR_RT_SDK_DIR:-${site_dir}/nvvfx/libs}"
+export LD_LIBRARY_PATH="${site_dir}/nvvfx/libs:${site_dir}/nvidia_vfx.libs:${LD_LIBRARY_PATH:-}"
+
+# run relay daemon with forwarded args
+exec "${venv_py}" "${script_dir}/neural/relay/vsr_relay.py" "$@"
