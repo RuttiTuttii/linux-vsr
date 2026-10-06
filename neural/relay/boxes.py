@@ -124,10 +124,21 @@ def read_tfhd_default(media, traf_off, traf_end):
             return None
         kind, size, header = box
         if kind == "tfhd":
-            # parse flags for default duration presence
+            # parse flags after version byte
             flags = int.from_bytes(media[cur + header + 1:cur + header + 4], "big")
+            # walk optional fields in flag order
+            pos = cur + header + 8
+            # skip base data offset field
+            if flags & 0x1:
+                pos += 8
+            # skip sample description index field
+            if flags & 0x2:
+                pos += 4
+            # read default sample duration field
             if flags & 0x8:
-                (dur,) = struct.unpack_from(">I", media, cur + header + 4)
+                if pos + 4 > cur + size:
+                    return None
+                (dur,) = struct.unpack_from(">I", media, pos)
                 return dur
             return None
         cur += size
