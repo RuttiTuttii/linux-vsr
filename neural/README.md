@@ -18,6 +18,20 @@ python3 -m venv /tmp/vsr-neural
 # expect avg_ms ~2-3 on rtx 5070, outputs in /tmp/vsr_neural_out/
 ```
 
+## mpv realtime tier
+
+native mpv video filter over `libvsr_rt`, no python in frame loop:
+
+```bash
+# one-time overlay build (mpv v0.41.0 tree in /tmp/mpv-build)
+./neural/mpv/build_mpv.sh
+# play anything neural-upscaled, 720p source recommended for realtime
+./bin/linux-vsr-play <url> --height 720 --quality 3
+# local file through overlay mpv directly
+VSR_RT_LIB=$PWD/build/libvsr_rt.so /tmp/mpv-build/build/mpv \
+  --vf=vsr:quality=3:scale=2 file.mp4
+```
+
 ## notes
 
 - needs nvidia gpu with tensor cores, driver 570+, cuda 12+
