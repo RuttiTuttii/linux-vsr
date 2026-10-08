@@ -204,6 +204,10 @@ launch_with_dump() {
         prof="/tmp/vsr-dump-profile-chrome"
         mkdir -p "${prof}"
         extra=(--user-data-dir="${prof}" --no-first-run "$@")
+        # match the normal launcher so Chromium reaches the OpenGL hook
+        if [ "${VSR_CHROMIUM_GL:-1}" != "0" ]; then
+            extra+=(--use-gl=angle --use-angle=gl --ozone-platform=x11)
+        fi
     else
         extra=("$@")
     fi

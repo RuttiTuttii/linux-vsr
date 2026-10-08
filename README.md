@@ -2,7 +2,7 @@
 
 linux-vsr is a lightweight graphics layer and driver shim that enables automatic hardware video super resolution (analogous to nvidia rtx video super resolution) across linux applications, including zen browser, mozilla firefox, chromium, and video players.
 
-it intercepts opengl and egl shader compilation on the fly and upgrades naive bilinear video scaling filters to amd fidelityfx contrast adaptive sharpening (cas) or edge-adaptive spatial upsampling (easu) directly inside the gpu fragment pipeline without browser modifications or overhead.
+it intercepts opengl and egl shader compilation on the fly and upgrades naive bilinear video scaling filters to amd fidelityfx contrast adaptive sharpening (cas), edge-adaptive spatial upsampling (easu), or an experimental directional sharpen pass directly inside the gpu fragment pipeline without browser modifications or frame copies. The launcher selects Chromium's ANGLE/OpenGL path by default so Chromium, Brave, Firefox, and Zen can use the same hook; set `VSR_CHROMIUM_GL=0` to keep Chromium on its default backend.
 
 ---
 
@@ -211,7 +211,7 @@ VSR_BACKEND=nvidia ./bin/linux-vsr
 
 * **browser sandboxing (security trade-off):** injecting via `LD_PRELOAD` into gecko gpu/rdd child processes requires disabling process sandboxes (`MOZ_DISABLE_*_SANDBOX=1`). this is an intentional trade-off required for shader interception.
 * **multi-instance remote forward:** if zen browser or firefox is already running, launching `./bin/linux-vsr` without profile isolation forwards to the existing instance without preloading `libvsr.so`. you must either launch the browser with the wrapper initially or attach to the running pid via `./bin/linux-vsr attach <PID>`.
-* **webrender focus:** the shader patcher is currently tuned and verified against webrender (zen browser, mozilla firefox). chromium (skia) and mpv (gpu-next) utilize different shader variable names and pipelines; dedicated signatures for them are work in progress.
+* **browser backend selection:** Firefox and Zen use their native WebRender/OpenGL path. The launcher starts Chromium-family browsers with ANGLE/OpenGL on Xwayland so the same GLSL hook is reached; pure Vulkan/Graphite remains a separate path.
 * **no in-video interactive gui:** interactive buttons and overlays cannot be drawn from the `glShaderSource` compilation layer without separate render passes. all live tuning is handled via the `linux-vsr-ctl` cli tool.
 * **vulkan backend bypass:** if the browser is forced to run on pure vulkan, opengl/egl interception is bypassed. support for vulkan requires hooking `vkCreateShaderModule` with spir-v byte patching.
 * **nvidia and amd browser path:** the current native hook applies the GLSL fragment path on both vendors and records the resolved DRM backend. NVIDIA's proprietary RTX Video Super Resolution AI path is a separate compute/SDK integration; `VSR_BACKEND=nvidia` does not claim to emulate that proprietary model.

@@ -51,6 +51,7 @@ usage: linux-vsr [command] [args]
 env overrides:
   VSR_ENABLE, VSR_DEBUG, VSR_SHARPNESS, VSR_MODE, VSR_BACKEND
   VSR_WATERMARK, VSR_WATERMARK_OPACITY, VSR_WATERMARK_SIZE
+  VSR_CHROMIUM_GL=0       keep Chromium on its default ANGLE/Vulkan path
   VSR_MODEL, VSR_CONFIG
 examples:
   ./bin/linux-vsr
@@ -149,9 +150,28 @@ cmd_launch() {
         echo -e "\033[1;31m[linux-vsr error]\033[0m no browser or media player found to launch" >&2
         exit 1
     fi
+    # Chromium's default Wayland path uses ANGLE/Vulkan and bypasses the
+    # OpenGL shader hook; select ANGLE/OpenGL on Xwayland for native patching.
+    launch_args=("$@")
+    target_name="$(basename "${target_bin}")"
+    if [[ "${target_name}" == *chrom* || "${target_name}" == *brave* || "${target_name}" == *chrome* ]] \
+        && [ "${VSR_CHROMIUM_GL:-1}" != "0" ]; then
+        has_gl_flag=0
+        has_angle_flag=0
+        has_ozone_flag=0
+        for arg in "${launch_args[@]}"; do
+            [[ "${arg}" == --use-gl=* ]] && has_gl_flag=1
+            [[ "${arg}" == --use-angle=* ]] && has_angle_flag=1
+            [[ "${arg}" == --ozone-platform=* ]] && has_ozone_flag=1
+        done
+        [ "${has_gl_flag}" -eq 1 ] || launch_args+=("--use-gl=angle")
+        [ "${has_angle_flag}" -eq 1 ] || launch_args+=("--use-angle=gl")
+        [ "${has_ozone_flag}" -eq 1 ] || launch_args+=("--ozone-platform=x11")
+        echo -e "\033[1;36m[linux-vsr]\033[0m Chromium ANGLE/OpenGL path enabled for shader interception"
+    fi
     # exec target with remaining args
     echo -e "\033[1;32m[linux-vsr]\033[0m launching ${target_bin} with native hardware vsr..."
-    exec "${target_bin}" "$@"
+    exec "${target_bin}" "${launch_args[@]}"
 }
 
 # parse top-level command
