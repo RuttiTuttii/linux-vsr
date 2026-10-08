@@ -263,6 +263,12 @@ static void vsr_hook_forward_source(unsigned int shader, int count, const char *
 static int g_dump_count = 0;
 static long g_shader_total = 0;
 
+// use caller-owned diagnostic paths when running isolated browser tests
+static const char *vsr_hook_diagnostic_path(const char *key, const char *fallback) {
+    const char *path = getenv(key);
+    return path && path[0] != '\0' ? path : fallback;
+}
+
 // dump interesting shaders to /tmp for diagnosis
 static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
     // check opt-in env once
@@ -282,6 +288,8 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
     if ((!dump_enabled && !dump_all) || !combined) {
         return;
     }
+    // keep each test run separate from interactive wizard diagnostics
+    const char *dump_dir = vsr_hook_diagnostic_path("VSR_DUMP_DIR", "/tmp/vsr_shaders");
     // detect video markers (broad yuv identifiers, bare sColor0 excluded as noise)
     bool has_video = strstr(combined, "ycbcr") || strstr(combined, "Ycbcr")
         || strstr(combined, "vUv_") || strstr(combined, "vUV_")
@@ -291,9 +299,12 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
     if (!dump_all && !has_video) {
         // update stats file every 50 calls so empty dumps still leave trace
         if ((total % 50) == 0) {
-            mkdir("/tmp/vsr_shaders", 0755);
-            char spath[128] = {0};
-            snprintf(spath, sizeof(spath), "/tmp/vsr_shaders/stats_%d.log", (int)getpid());
+            mkdir(dump_dir, 0700);
+            char spath[VSR_MAX_PATH_LEN] = {0};
+            int written = snprintf(spath, sizeof(spath), "%s/stats_%d.log", dump_dir, (int)getpid());
+            if (written < 0 || (size_t)written >= sizeof(spath)) {
+                return;
+            }
             FILE *sfp = fopen(spath, "w");
             if (sfp) {
                 fprintf(sfp, "pid=%d total=%ld video=0 note=no-video-markers-yet\n", (int)getpid(), total);
@@ -308,10 +319,13 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
         return;
     }
     // ensure dump directory exists
-    mkdir("/tmp/vsr_shaders", 0755);
+    mkdir(dump_dir, 0700);
     // build dump path
-    char path[128] = {0};
-    snprintf(path, sizeof(path), "/tmp/vsr_shaders/shader_%d_%u.glsl", (int)getpid(), shader);
+    char path[VSR_MAX_PATH_LEN] = {0};
+    int written = snprintf(path, sizeof(path), "%s/shader_%d_%u.glsl", dump_dir, (int)getpid(), shader);
+    if (written < 0 || (size_t)written >= sizeof(path)) {
+        return;
+    }
     // write combined source to file
     FILE *fp = fopen(path, "w");
     if (fp) {
@@ -321,8 +335,11 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
         vsr_log_info("dumped shader %u to %s (total=%ld video=%d)", shader, path, total, has_video ? 1 : 0);
     }
     // update stats file
-    char spath[128] = {0};
-    snprintf(spath, sizeof(spath), "/tmp/vsr_shaders/stats_%d.log", (int)getpid());
+    char spath[VSR_MAX_PATH_LEN] = {0};
+    written = snprintf(spath, sizeof(spath), "%s/stats_%d.log", dump_dir, (int)getpid());
+    if (written < 0 || (size_t)written >= sizeof(spath)) {
+        return;
+    }
     FILE *sfp = fopen(spath, "w");
     if (sfp) {
         fprintf(sfp, "pid=%d total=%ld dumped=%d\n", (int)getpid(), total, g_dump_count);
@@ -439,7 +456,7 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
                 // log success in debug mode
                 vsr_log_debug("patched video pipeline shader (%zu -> %zu bytes)", total_len, patched_len);
                 // record hit to file for redirection-proof verdict
-                FILE *hit_fp = fopen("/tmp/vsr_hits.log", "a");
+                FILE *hit_fp = fopen(vsr_hook_diagnostic_path("VSR_HIT_LOG", "/tmp/vsr_hits.log"), "a");
                 if (hit_fp) {
                     // format sharpness as integer hundredths to avoid locale decimals
                     int sharp100 = (int)(sharpness * 100.0f + 0.5f);
@@ -513,7 +530,7 @@ void glCompileShader(unsigned int shader) {
         log_buf[0] = '\0';
     }
     // append failure record for triage
-    FILE *fp = fopen("/tmp/vsr_compile_errors.log", "a");
+    FILE *fp = fopen(vsr_hook_diagnostic_path("VSR_COMPILE_LOG", "/tmp/vsr_compile_errors.log"), "a");
     if (fp) {
         fprintf(fp, "pid=%d shader=%u status=FAIL log=%.500s\n", (int)getpid(), shader, log_buf);
         fclose(fp);

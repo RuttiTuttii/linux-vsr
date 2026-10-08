@@ -63,6 +63,7 @@ test-python:
 
 test-cli: $(LIB_TARGET)
 	$(PYTHON) tests/test_launcher.py
+	CC="$(CC)" $(PYTHON) tests/test_hook_diagnostics.py
 
 $(TEST_TARGET): $(CORE_TEST_OBJECTS) $(TEST_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
