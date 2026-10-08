@@ -68,16 +68,44 @@ def slice_range(body, req_headers, content_type):
     # find range header value
     raw = req_headers.get("Range") or req_headers.get("range")
     if not raw or not raw.startswith("bytes="):
-        return (body, 200, {"Content-Type": content_type, "Content-Length": str(len(body))})
+        return (
+            body,
+            200,
+            {
+                "Content-Type": content_type,
+                "Content-Length": str(len(body)),
+                "Accept-Ranges": "bytes",
+            },
+        )
     # parse first byte range spec
     try:
         spec = raw[len("bytes="):].split(",")[0].strip()
         start_s, end_s = spec.split("-")
-        start = int(start_s) if start_s else 0
-        end = int(end_s) if end_s else len(body) - 1
+        if not body:
+            raise ValueError("empty body")
+        if start_s:
+            start = int(start_s)
+            end = int(end_s) if end_s else len(body) - 1
+        else:
+            suffix_len = int(end_s)
+            if suffix_len <= 0:
+                raise ValueError("invalid suffix range")
+            start = max(len(body) - suffix_len, 0)
+            end = len(body) - 1
+        if start < 0 or start >= len(body) or end < start:
+            raise ValueError("range outside body")
         end = min(end, len(body) - 1)
-    except ValueError:
-        return (body, 200, {"Content-Type": content_type, "Content-Length": str(len(body))})
+    except (TypeError, ValueError):
+        return (
+            b"",
+            416,
+            {
+                "Content-Type": content_type,
+                "Content-Length": "0",
+                "Content-Range": f"bytes */{len(body)}",
+                "Accept-Ranges": "bytes",
+            },
+        )
     # slice payload and describe range
     part = body[start:end + 1]
     headers = {
