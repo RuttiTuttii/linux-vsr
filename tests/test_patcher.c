@@ -131,6 +131,17 @@ void test_patcher_target_identification(void) {
         "    ycbcr_sample_1.x = texture (sColor0, min (max (vUV_y, vUVBounds_y.xy), vUVBounds_y.zw)).x;\n"
         "}\n";
     assert(vsr_patcher_is_target_shader(modern_alt) == true);
+    // vertex-stage YUV varyings must not be treated as fragment samples
+    const char *vertex_yuv =
+        "#version 150\n"
+        "// ps_quad_yuv\n"
+        "out vec2 vUv_Y;\n"
+        "flat out vec4 vUvBounds_Y;\n"
+        "uniform sampler2D sColor0;\n"
+        "void main() {\n"
+        "    vUv_Y = vec2(textureSize (sColor0, 0));\n"
+        "}\n";
+    assert(vsr_patcher_is_target_shader(vertex_yuv) == false);
 }
 
 // unit test for upscaler injection

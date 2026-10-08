@@ -28,9 +28,13 @@ bool vsr_patcher_is_target_shader(const char *source) {
     // real desktop glsl uses vUv_Y/vUvBounds_Y, some builds use vUV_y variant
     bool has_uv_pair = (strstr(source, "vUv_Y") != NULL && strstr(source, "vUvBounds_Y") != NULL)
         || (strstr(source, "vUV_y") != NULL && strstr(source, "vUVBounds_y") != NULL);
+    // require a fragment-stage luma sample, not only vertex-stage varyings
+    bool has_luma_sample = (strstr(source, "texture (sColor0") != NULL)
+        || (strstr(source, "texture(sColor0") != NULL);
     bool modern = (strstr(source, "ycbcr") != NULL || strstr(source, "Ycbcr") != NULL
             || strstr(source, "ps_quad_yuv") != NULL || strstr(source, "Debiased") != NULL)
         && has_uv_pair
+        && has_luma_sample
         && (strstr(source, "sColor0") != NULL);
     // accept either pipeline
     return legacy || modern;
