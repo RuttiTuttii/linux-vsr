@@ -4,6 +4,9 @@
 void test_backend_explicit(void);
 void test_backend_auto(void);
 void test_backend_guards(void);
+void test_vulkan_vertex_module(void);
+void test_vulkan_fragment_module(void);
+void test_vulkan_guards(void);
 void test_config_defaults(void);
 void test_config_env_overrides(void);
 void test_config_invalid_env(void);
@@ -42,6 +45,11 @@ int main(void) {
     test_backend_auto();
     test_backend_guards();
     printf("  [pass] backend module tests\n");
+    // execute Vulkan/SPIR-V observation tests
+    test_vulkan_vertex_module();
+    test_vulkan_fragment_module();
+    test_vulkan_guards();
+    printf("  [pass] vulkan module tests\n");
     // execute patcher unit tests
     test_patcher_replace_all();
     test_patcher_replace_safety();
