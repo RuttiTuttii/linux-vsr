@@ -64,7 +64,7 @@ bool vsr_config_validate(vsr_config_t *cfg) {
     }
     // validate mode value
     if (strcmp(cfg->mode, "cas") != 0 && strcmp(cfg->mode, "easu") != 0
-        && strcmp(cfg->mode, "nis") != 0 && strcmp(cfg->mode, "off") != 0) {
+        && strcmp(cfg->mode, "directional") != 0 && strcmp(cfg->mode, "off") != 0) {
         // fallback to safe default on unknown mode
         strncpy(cfg->mode, "cas", sizeof(cfg->mode) - 1);
         cfg->mode[sizeof(cfg->mode) - 1] = '\0';

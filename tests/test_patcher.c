@@ -209,11 +209,11 @@ void test_patcher_injection_safety(void) {
     char *easu = vsr_patcher_inject_upscaler_full(valid, "easu", 0.22f, false, 0.45f, 0.06f);
     assert(easu != NULL);
     free(easu);
-    // test NVIDIA Image Scaling compatible mode path
-    char *nis = vsr_patcher_inject_upscaler_full(valid, "nis", 0.22f, false, 0.45f, 0.06f);
-    assert(nis != NULL);
-    assert(strstr(nis, "NVIDIA Image Scaling") != NULL);
-    free(nis);
+    // test directional sharpen mode path
+    char *directional = vsr_patcher_inject_upscaler_full(valid, "directional", 0.22f, false, 0.45f, 0.06f);
+    assert(directional != NULL);
+    assert(strstr(directional, "directional sharpen") != NULL);
+    free(directional);
     // test short luma call where replacement is longer than original (growth path)
     const char *short_call =
         "#version 300 es\n"

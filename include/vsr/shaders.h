@@ -13,10 +13,10 @@ char* vsr_shader_generate_cas_full(float sharpness, bool watermark, float opacit
 // generate easu with watermark badge baked in
 char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_frac);
 
-// generate NVIDIA Image Scaling compatible directional sharpen fragment
-char* vsr_shader_generate_nis_full(float sharpness, bool watermark, float opacity, float size_frac);
+// generate vendor-neutral directional sharpen fragment
+char* vsr_shader_generate_directional_full(float sharpness, bool watermark, float opacity, float size_frac);
 
-// dispatch generator by mode name (cas/easu/nis/off)
+// dispatch generator by mode name (cas/easu/directional/off)
 char* vsr_shader_generate_upscaler(const char *mode, float sharpness, bool watermark, float opacity, float size_frac);
 
 #endif // VSR_SHADERS_H

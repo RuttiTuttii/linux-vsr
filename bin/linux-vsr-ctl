@@ -35,7 +35,7 @@ usage: linux-vsr-ctl <command> [args]
   status                 show current settings
   get <key>              read single key
   set <key> <value>      write key and hot-reload
-  mode cas|easu|nis|off  switch upscaler
+  mode cas|easu|directional|off  switch upscaler
   backend auto|amd|nvidia|generic  select hardware backend
   sharpness <0.0-0.5>    set sharpness
   watermark on|off       toggle badge
@@ -104,7 +104,7 @@ cmd_menu() {
     while true; do
         echo "--- linux-vsr menu ---"
         echo "current: mode=$(cfg_get mode) sharp=$(cfg_get sharpness) watermark=$(cfg_get watermark)"
-        echo "1) switch mode (cas/easu/nis/off)"
+        echo "1) switch mode (cas/easu/directional/off)"
         echo "2) set sharpness"
         echo "3) toggle watermark"
         echo "4) set model path"
@@ -149,8 +149,8 @@ case "${cmd}" in
     # switch upscaler mode
     mode)
         m="${2:-}"
-        if [[ "${m}" != "cas" && "${m}" != "easu" && "${m}" != "nis" && "${m}" != "off" ]]; then
-            echo "mode must be cas/easu/nis/off" >&2
+        if [[ "${m}" != "cas" && "${m}" != "easu" && "${m}" != "directional" && "${m}" != "off" ]]; then
+            echo "mode must be cas/easu/directional/off" >&2
             exit 1
         fi
         cfg_set "mode" "${m}"

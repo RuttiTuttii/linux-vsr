@@ -59,11 +59,11 @@ void test_shaders_easu(void) {
     free(plain);
 }
 
-// unit test for NVIDIA Image Scaling compatible directional sharpen
-void test_shaders_nis(void) {
-    char *s = vsr_shader_generate_nis_full(0.22f, false, 0.45f, 0.06f);
+// unit test for vendor-neutral directional sharpen
+void test_shaders_directional(void) {
+    char *s = vsr_shader_generate_directional_full(0.22f, false, 0.45f, 0.06f);
     assert(s != NULL);
-    assert(strstr(s, "NVIDIA Image Scaling") != NULL);
+    assert(strstr(s, "directional sharpen") != NULL);
     assert(strstr(s, "sample_luma_cas") != NULL);
     free(s);
 }
@@ -108,11 +108,11 @@ void test_shaders_dispatch(void) {
     char *easu = vsr_shader_generate_upscaler("easu", 0.22f, false, 0.45f, 0.06f);
     assert(easu != NULL);
     free(easu);
-    // dispatch NVIDIA Image Scaling compatible mode
-    char *nis = vsr_shader_generate_upscaler("nis", 0.22f, false, 0.45f, 0.06f);
-    assert(nis != NULL);
-    assert(strstr(nis, "NVIDIA Image Scaling") != NULL);
-    free(nis);
+    // dispatch directional sharpen mode
+    char *directional = vsr_shader_generate_upscaler("directional", 0.22f, false, 0.45f, 0.06f);
+    assert(directional != NULL);
+    assert(strstr(directional, "directional sharpen") != NULL);
+    free(directional);
     // dispatch off mode returns null
     char *off = vsr_shader_generate_upscaler("off", 0.22f, false, 0.45f, 0.06f);
     assert(off == NULL);

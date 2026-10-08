@@ -268,8 +268,8 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
     return buffer;
 }
 
-// generate NVIDIA Image Scaling compatible directional sharpen fragment
-char* vsr_shader_generate_nis_full(float sharpness, bool watermark, float opacity, float size_frac) {
+// generate vendor-neutral directional sharpen fragment
+char* vsr_shader_generate_directional_full(float sharpness, bool watermark, float opacity, float size_frac) {
     sharpness = vsr_safe_clamp_float(sharpness, 0.0f, 0.50f);
     opacity = vsr_safe_clamp_float(opacity, 0.05f, 1.0f);
     size_frac = vsr_safe_clamp_float(size_frac, 0.02f, 0.15f);
@@ -290,7 +290,7 @@ char* vsr_shader_generate_nis_full(float sharpness, bool watermark, float opacit
         off += (size_t)wm;
     }
     int written = snprintf(buffer + off, VSR_SHADER_BUF - off,
-        "\n// === linux-vsr: NVIDIA Image Scaling directional sharpen ===\n"
+        "\n// === linux-vsr: directional sharpen ===\n"
         "float sample_luma_cas(sampler2D tex, vec2 uv, vec4 bounds) {\n"
         "    vec2 size = vec2(textureSize(tex, 0));\n"
         "    vec2 texel = 1.0 / max(size, vec2(1.0));\n"
@@ -316,7 +316,7 @@ char* vsr_shader_generate_nis_full(float sharpness, bool watermark, float opacit
     if (written <= 0 || (size_t)written >= VSR_SHADER_BUF - off) {
         vsr_locale_pop(saved_locale, c_locale);
         free(buffer);
-        vsr_safety_set_error("nis snippet truncated");
+        vsr_safety_set_error("directional snippet truncated");
         return NULL;
     }
     off += (size_t)written;
@@ -327,14 +327,14 @@ char* vsr_shader_generate_nis_full(float sharpness, bool watermark, float opacit
     if (tail_written <= 0 || (size_t)tail_written >= VSR_SHADER_BUF - off) {
         vsr_locale_pop(saved_locale, c_locale);
         free(buffer);
-        vsr_safety_set_error("nis tail truncated");
+        vsr_safety_set_error("directional tail truncated");
         return NULL;
     }
     vsr_locale_pop(saved_locale, c_locale);
     return buffer;
 }
 
-// dispatch generator by mode name (cas/easu/nis/off)
+// dispatch generator by mode name (cas/easu/directional/off)
 char* vsr_shader_generate_upscaler(const char *mode, float sharpness, bool watermark, float opacity, float size_frac) {
     // handle null mode as default cas
     if (!mode || mode[0] == '\0') {
@@ -348,9 +348,9 @@ char* vsr_shader_generate_upscaler(const char *mode, float sharpness, bool water
     if (strcmp(mode, "easu") == 0) {
         return vsr_shader_generate_easu_full(watermark, opacity, size_frac);
     }
-    // dispatch NVIDIA Image Scaling compatible sharpen branch
-    if (strcmp(mode, "nis") == 0) {
-        return vsr_shader_generate_nis_full(sharpness, watermark, opacity, size_frac);
+    // dispatch directional sharpen branch
+    if (strcmp(mode, "directional") == 0) {
+        return vsr_shader_generate_directional_full(sharpness, watermark, opacity, size_frac);
     }
     // handle off mode as null (no injection)
     if (strcmp(mode, "off") == 0) {
