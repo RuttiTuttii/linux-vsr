@@ -14,7 +14,6 @@ if [ ! -f "${lib_vsr}" ]; then
     make -C "${script_dir}" -j"$(nproc)"
 fi
 export LD_PRELOAD="${lib_vsr}${LD_PRELOAD:+:${LD_PRELOAD}}"
-export VSR_BACKEND="${VSR_BACKEND:-auto}"
 
 # parse debugging port
 port="${1:-9222}"

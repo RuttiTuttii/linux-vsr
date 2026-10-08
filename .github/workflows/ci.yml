@@ -40,6 +40,10 @@ jobs:
         run: |
           make test-python
 
+      - name: run launcher regression tests
+        run: |
+          make test-cli
+
       - name: verify binary output
         run: |
           test -f libvsr.so

@@ -99,8 +99,14 @@ cmd_status() {
 
 # launch target application with preload
 cmd_launch() {
-    # configure nvidia vaapi and wayland environment
-    export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+    # select NVIDIA VAAPI only when an NVIDIA DRM card is present
+    for vendor_file in /sys/class/drm/card*/device/vendor; do
+        if [[ -r "${vendor_file}" ]] && [[ "$(<"${vendor_file}")" == "0x10de" ]]; then
+            export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-nvidia}"
+            export NVD_BACKEND="${NVD_BACKEND:-direct}"
+            break
+        fi
+    done
     # disable firefox-family sandboxes so LD_PRELOAD reaches gpu/content processes
     # note: this weakens browser isolation, required for shader interposition
     export MOZ_DISABLE_RDD_SANDBOX=1
@@ -112,16 +118,7 @@ cmd_launch() {
     # suppress crash-reporter and auto safe-mode dialogs
     export MOZ_CRASHREPORTER_DISABLE=1
     export MOZ_DISABLE_AUTO_SAFE_MODE=1
-    export NVD_BACKEND="${NVD_BACKEND:-direct}"
-    # configure vsr tuning options with safe defaults
-    export VSR_SHARPNESS="${VSR_SHARPNESS:-0.15}"
-    export VSR_DEBUG="${VSR_DEBUG:-1}"
-    export VSR_ENABLE="${VSR_ENABLE:-1}"
-    export VSR_MODE="${VSR_MODE:-cas}"
-    export VSR_BACKEND="${VSR_BACKEND:-auto}"
-    export VSR_WATERMARK="${VSR_WATERMARK:-1}"
-    export VSR_WATERMARK_OPACITY="${VSR_WATERMARK_OPACITY:-0.45}"
-    export VSR_WATERMARK_SIZE="${VSR_WATERMARK_SIZE:-0.06}"
+    # let the library load saved settings; existing env overrides pass through
     export VSR_CONFIG="${cfg_file}"
     # pass through optional model path
     if [ -n "${VSR_MODEL:-}" ]; then
@@ -189,6 +186,6 @@ case "${cmd}" in
         ;;
     # fallback: treat as binary name for backward compat
     *)
-        cmd_launch "${cmd}" "$@"
+        cmd_launch "$@"
         ;;
 esac
