@@ -53,12 +53,22 @@ def test_invalid_ranges():
     print("  [pass] invalid ranges")
 
 
+def test_googlevideo_origin_filter():
+    assert vsr_relay.is_googlevideo_url("https://r1---sn.googlevideo.com/video")
+    assert vsr_relay.is_googlevideo_url("https://googlevideo.com/video")
+    assert not vsr_relay.is_googlevideo_url("http://r1---sn.googlevideo.com/video")
+    assert not vsr_relay.is_googlevideo_url("https://googlevideo.com.example/video")
+    assert not vsr_relay.is_googlevideo_url("https://example.com/googlevideo/video")
+    print("  [pass] googlevideo origin filter")
+
+
 def main():
     print("running relay helper tests...")
     test_full_body()
     test_explicit_range()
     test_open_and_suffix_ranges()
     test_invalid_ranges()
+    test_googlevideo_origin_filter()
     print("all relay helper tests passed")
     return 0
 
