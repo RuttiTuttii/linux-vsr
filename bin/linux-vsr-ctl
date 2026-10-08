@@ -19,7 +19,7 @@ if [ ! -f "${cfg_file}" ]; then
     cat > "${cfg_file}" << 'EOF'
 enable=1
 debug=1
-sharpness=0.22
+sharpness=0.15
 mode=cas
 watermark=1
 watermark_opacity=0.45
