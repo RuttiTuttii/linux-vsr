@@ -1,5 +1,9 @@
 # план релиза linux-vsr
 
+подробный технический замысел и критерии готовности: DESIGN.ru.md и DESIGN.md.
+Интеграционный browser stand запускается через python3 tests/browser_stand.py
+и всегда пишет доказательства конкретного запуска в отдельный каталог.
+
 ## готово (v1)
 
 - браузерный ярус: `libvsr.so` перехватывает `glShaderSource`/`dlsym`,
@@ -33,9 +37,16 @@
 - риск: капризы vo с cuda-кадрами под wayland, нужен фолбэк на download
 
 ### chromium и производные
-- снять дампы шейдеров skia/graphite через `linux-vsr-setup`
+- снять локальные dumps шейдеров skia/graphite через browser stand
 - завести детект и замену luma-семплинга как сделали для webrender
 - проверить sandbox-флаги `--no-sandbox` для доводки прелоада
+
+### проверяемость и качество
+- добавить browser matrix для stable/nightly Firefox, Zen, Chromium и Brave
+- хранить commit, driver, vendor, mode, compile errors и timestamps рядом с
+  каждым report.json
+- заменить фиксированное обещание latency на p50/p95/p99 GPU measurements
+- добавить synthetic fixtures для текста, chroma edges, HDR/PQ, grain и blocks
 
 ### бейдж и режимы
 - опция один бейдж вместо двух (ориентация уже определяется опытом)

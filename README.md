@@ -207,6 +207,23 @@ VSR_BACKEND=nvidia ./bin/linux-vsr
 
 ---
 
+### browser integration stand
+
+the stand uses a local synthetic 4:2:0 video, an isolated profile, and per-run
+diagnostic paths. It does not depend on YouTube or a network connection.
+
+    make test-browser
+    python3 tests/browser_stand.py --browser /usr/bin/zen-browser \
+      --seconds 12 --output /tmp/linux-vsr-browser-stand
+
+it writes report.json, browser.log, shader dumps, compile errors, and a
+private hit-log. PASS_PATCHED means the current process produced a shader hit.
+OBSERVED_VIDEO_NO_HIT means the browser reached a video shader that still needs
+a patcher signature. Use --strict only for a known-good browser/backend pair.
+
+the full architecture, backend plan, Vulkan design, AI bridge, quality gates,
+and implementation order live in DESIGN.md.
+
 ### known issues and limitations
 
 * **browser sandboxing (security trade-off):** injecting via `LD_PRELOAD` into gecko gpu/rdd child processes requires disabling process sandboxes (`MOZ_DISABLE_*_SANDBOX=1`). this is an intentional trade-off required for shader interception.

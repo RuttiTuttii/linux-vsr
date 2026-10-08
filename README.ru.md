@@ -207,6 +207,25 @@ VSR_BACKEND=nvidia ./bin/linux-vsr
 
 ---
 
+### browser integration stand
+
+для интеграционной проверки браузера есть отдельный стенд. Он создаёт
+локальное synthetic 4:2:0 видео, запускает изолированный профиль и не зависит
+от YouTube или сети.
+
+    make test-browser
+    python3 tests/browser_stand.py --browser /usr/bin/zen-browser \
+      --seconds 12 --output /tmp/linux-vsr-browser-stand
+
+стенд сохраняет report.json, browser.log, shader dumps, compile errors и
+private hit-log текущего запуска. PASS_PATCHED означает, что текущий процесс
+реально записал shader hit. OBSERVED_VIDEO_NO_HIT означает, что браузер дошёл
+до video shader, но для него ещё нужна сигнатура patcher. --strict используй
+только для заранее проверенной связки browser/backend.
+
+полная архитектура, план backend-ов, Vulkan-дизайн, AI bridge, quality gates и
+порядок реализации описаны в DESIGN.ru.md.
+
 ### текущие проблемы и ограничения
 
 * **песочницы браузера (security trade-off):** для доставки `LD_PRELOAD` в дочерние gpu/rdd-процессы gecko требуется отключать внутренние песочницы (`MOZ_DISABLE_*_SANDBOX=1`). это осознанный компромисс безопасности, о котором браузер может предупреждать при запуске.
