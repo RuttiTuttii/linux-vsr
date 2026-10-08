@@ -44,6 +44,10 @@ jobs:
         run: |
           make test-cli
 
+      - name: run browser stand unit tests
+        run: |
+          make test-browser
+
       - name: verify binary output
         run: |
           test -f libvsr.so

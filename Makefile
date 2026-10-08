@@ -19,7 +19,7 @@ TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%.o, $(TEST_SOURCES))
 # modules needed for tests (excluding hook and main which intercept symbols)
 CORE_TEST_OBJECTS = $(BUILDDIR)/backend.o $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o $(BUILDDIR)/safety.o $(BUILDDIR)/vulkan.o
 
-.PHONY: all clean test test-python test-cli test-neural neural-rt
+.PHONY: all clean test test-python test-cli test-browser test-neural neural-rt browser-stand
 
 all: $(LIB_TARGET)
 
@@ -64,6 +64,12 @@ test-python:
 test-cli: $(LIB_TARGET)
 	$(PYTHON) tests/test_launcher.py
 	CC="$(CC)" $(PYTHON) tests/test_hook_diagnostics.py
+
+test-browser:
+	$(PYTHON) tests/test_browser_stand.py
+
+browser-stand: $(LIB_TARGET)
+	$(PYTHON) tests/browser_stand.py
 
 $(TEST_TARGET): $(CORE_TEST_OBJECTS) $(TEST_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
