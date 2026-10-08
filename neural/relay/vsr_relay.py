@@ -134,6 +134,18 @@ def is_video_url(url):
     return "video/" in mime
 
 
+# accept only HTTPS googlevideo origins for relay fetches
+def is_googlevideo_url(url):
+    # parse hostname instead of matching arbitrary URL text
+    parsed = urllib.parse.urlparse(url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    return (
+        parsed.scheme == "https"
+        and bool(hostname)
+        and (hostname == "googlevideo.com" or hostname.endswith(".googlevideo.com"))
+    )
+
+
 # format headers for bidi bytes value shape
 def bidi_headers(headers):
     # convert mapping to name and typed value pairs
@@ -224,7 +236,7 @@ def main():
             if isinstance(h.get("value"), dict):
                 req_headers[h["name"]] = h["value"]["value"]
         # passthrough anything outside video hosts instantly
-        if "googlevideo" not in url or not is_video_url(url):
+        if not is_googlevideo_url(url) or not is_video_url(url):
             try:
                 bidi.cmd("network.continueRequest", {"request": rid})
             except Exception:
