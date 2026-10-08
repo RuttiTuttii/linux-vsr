@@ -154,7 +154,7 @@ allows adjusting settings and switching profiles without restarting running brow
 # adjust sharpness (0.0 to 0.5)
 ./bin/linux-vsr-ctl sharpness 0.30
 
-# switch upscaler mode (cas / easu / off)
+# switch upscaler mode (cas / easu / nis / off)
 ./bin/linux-vsr-ctl mode cas
 
 # toggle corner badge watermark
@@ -186,7 +186,7 @@ settings are stored in `~/.config/linux-vsr/config.ini` and can also be overridd
 | setting / variable | default | description |
 |---|---|---|
 | `enable` / `VSR_ENABLE` | `1` | toggle upscaling (`1` to enable, `0` to bypass) |
-| `mode` / `VSR_MODE` | `cas` | upscaler algorithm (`cas`, `easu`, `off`) |
+| `mode` / `VSR_MODE` | `cas` | upscaler algorithm (`cas`, `easu`, `nis`, `off`); `nis` is a GLSL NVIDIA Image Scaling compatible directional sharpen path |
 | `backend` / `VSR_BACKEND` | `auto` | hardware path (`auto`, `amd`, `nvidia`, `generic`) |
 | `sharpness` / `VSR_SHARPNESS` | `0.15` | adaptive sharpening strength (`0.0` to `0.50`) |
 | `debug` / `VSR_DEBUG` | `1` | output diagnostic messages to stderr |

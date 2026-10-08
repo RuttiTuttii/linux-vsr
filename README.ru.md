@@ -155,7 +155,7 @@ all unit tests completed successfully
 # смена резкости (от 0.0 до 0.5)
 ./bin/linux-vsr-ctl sharpness 0.30
 
-# переключение алгоритма (cas / easu / off)
+# переключение алгоритма (cas / easu / nis / off)
 ./bin/linux-vsr-ctl mode cas
 
 # включение/выключение углового индикатора
@@ -187,7 +187,7 @@ all unit tests completed successfully
 | параметр / переменная | значение по умолчанию | описание |
 |---|---|---|
 | `enable` / `VSR_ENABLE` | `1` | включение (`1`) или отключение (`0`) обработки |
-| `mode` / `VSR_MODE` | `cas` | алгоритм апскейла (`cas`, `easu`, `off`) |
+| `mode` / `VSR_MODE` | `cas` | алгоритм апскейла (`cas`, `easu`, `nis`, `off`); `nis` — совместимый с NVIDIA Image Scaling направленный GLSL-фильтр резкости |
 | `backend` / `VSR_BACKEND` | `auto` | аппаратный путь (`auto`, `amd`, `nvidia`, `generic`) |
 | `sharpness` / `VSR_SHARPNESS` | `0.15` | сила адаптивной резкости (от `0.0` до `0.50`) |
 | `debug` / `VSR_DEBUG` | `1` | вывод отладочных сообщений в stderr |

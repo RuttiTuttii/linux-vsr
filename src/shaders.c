@@ -268,7 +268,73 @@ char* vsr_shader_generate_easu_full(bool watermark, float opacity, float size_fr
     return buffer;
 }
 
-// dispatch generator by mode name (cas/easu/off)
+// generate NVIDIA Image Scaling compatible directional sharpen fragment
+char* vsr_shader_generate_nis_full(float sharpness, bool watermark, float opacity, float size_frac) {
+    sharpness = vsr_safe_clamp_float(sharpness, 0.0f, 0.50f);
+    opacity = vsr_safe_clamp_float(opacity, 0.05f, 1.0f);
+    size_frac = vsr_safe_clamp_float(size_frac, 0.02f, 0.15f);
+    char *buffer = (char *)vsr_safe_malloc(VSR_SHADER_BUF);
+    if (!buffer) {
+        return NULL;
+    }
+    locale_t saved_locale = (locale_t)0;
+    locale_t c_locale = vsr_locale_push_c(&saved_locale);
+    size_t off = 0;
+    if (watermark) {
+        int wm = vsr_shader_append_watermark(buffer, VSR_SHADER_BUF, off, opacity, size_frac);
+        if (wm < 0) {
+            vsr_locale_pop(saved_locale, c_locale);
+            free(buffer);
+            return NULL;
+        }
+        off += (size_t)wm;
+    }
+    int written = snprintf(buffer + off, VSR_SHADER_BUF - off,
+        "\n// === linux-vsr: NVIDIA Image Scaling directional sharpen ===\n"
+        "float sample_luma_cas(sampler2D tex, vec2 uv, vec4 bounds) {\n"
+        "    vec2 size = vec2(textureSize(tex, 0));\n"
+        "    vec2 texel = 1.0 / max(size, vec2(1.0));\n"
+        "    float l2 = texture(tex, clamp(uv - vec2(2.0 * texel.x, 0.0), bounds.xy, bounds.zw)).r;\n"
+        "    float l1 = texture(tex, clamp(uv - vec2(texel.x, 0.0), bounds.xy, bounds.zw)).r;\n"
+        "    float c = texture(tex, uv).r;\n"
+        "    float r1 = texture(tex, clamp(uv + vec2(texel.x, 0.0), bounds.xy, bounds.zw)).r;\n"
+        "    float r2 = texture(tex, clamp(uv + vec2(2.0 * texel.x, 0.0), bounds.xy, bounds.zw)).r;\n"
+        "    float t2 = texture(tex, clamp(uv - vec2(0.0, 2.0 * texel.y), bounds.xy, bounds.zw)).r;\n"
+        "    float t1 = texture(tex, clamp(uv - vec2(0.0, texel.y), bounds.xy, bounds.zw)).r;\n"
+        "    float b1 = texture(tex, clamp(uv + vec2(0.0, texel.y), bounds.xy, bounds.zw)).r;\n"
+        "    float b2 = texture(tex, clamp(uv + vec2(0.0, 2.0 * texel.y), bounds.xy, bounds.zw)).r;\n"
+        "    float gx = abs((l2 + l1) - (r1 + r2));\n"
+        "    float gy = abs((t2 + t1) - (b1 + b2));\n"
+        "    float edge = clamp(max(gx, gy) * 2.0, 0.0, 1.0);\n"
+        "    float usm_x = -0.6001 * l1 + 1.2002 * c - 0.6001 * r1;\n"
+        "    float usm_y = -0.6001 * t1 + 1.2002 * c - 0.6001 * b1;\n"
+        "    float usm = mix(usm_x, usm_y, gy / max(gx + gy, 0.0001));\n"
+        "    float limit = max(0.1 * c, 0.001);\n"
+        "    usm = clamp(usm * %.4ff, -limit, limit);\n"
+        "    float res = clamp(c + usm * edge, 0.0, 1.0);\n",
+        (double)(sharpness * 2.0f));
+    if (written <= 0 || (size_t)written >= VSR_SHADER_BUF - off) {
+        vsr_locale_pop(saved_locale, c_locale);
+        free(buffer);
+        vsr_safety_set_error("nis snippet truncated");
+        return NULL;
+    }
+    off += (size_t)written;
+    const char *tail = watermark
+        ? "    res = vsr_apply_badge(res, uv, bounds);\n    return res;\n}\n// === end linux-vsr ===\n\n"
+        : "    return res;\n}\n// === end linux-vsr ===\n\n";
+    int tail_written = snprintf(buffer + off, VSR_SHADER_BUF - off, "%s", tail);
+    if (tail_written <= 0 || (size_t)tail_written >= VSR_SHADER_BUF - off) {
+        vsr_locale_pop(saved_locale, c_locale);
+        free(buffer);
+        vsr_safety_set_error("nis tail truncated");
+        return NULL;
+    }
+    vsr_locale_pop(saved_locale, c_locale);
+    return buffer;
+}
+
+// dispatch generator by mode name (cas/easu/nis/off)
 char* vsr_shader_generate_upscaler(const char *mode, float sharpness, bool watermark, float opacity, float size_frac) {
     // handle null mode as default cas
     if (!mode || mode[0] == '\0') {
@@ -281,6 +347,10 @@ char* vsr_shader_generate_upscaler(const char *mode, float sharpness, bool water
     // dispatch easu branch
     if (strcmp(mode, "easu") == 0) {
         return vsr_shader_generate_easu_full(watermark, opacity, size_frac);
+    }
+    // dispatch NVIDIA Image Scaling compatible sharpen branch
+    if (strcmp(mode, "nis") == 0) {
+        return vsr_shader_generate_nis_full(sharpness, watermark, opacity, size_frac);
     }
     // handle off mode as null (no injection)
     if (strcmp(mode, "off") == 0) {

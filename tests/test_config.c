@@ -50,6 +50,10 @@ void test_config_env_overrides(void) {
     assert(cfg.watermark_enabled == false);
     assert(strcmp(cfg.mode, "easu") == 0);
     assert(strcmp(cfg.backend, "nvidia") == 0);
+    // accept the explicit NVIDIA Image Scaling mode
+    strncpy(cfg.mode, "nis", sizeof(cfg.mode) - 1);
+    assert(vsr_config_validate(&cfg) == true);
+    assert(strcmp(cfg.mode, "nis") == 0);
     // clean up environment
     unsetenv("VSR_ENABLE");
     unsetenv("VSR_DEBUG");
