@@ -17,7 +17,7 @@ TEST_SOURCES = $(wildcard $(TESTDIR)/*.c)
 TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%.o, $(TEST_SOURCES))
 
 # modules needed for tests (excluding hook and main which intercept symbols)
-CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o $(BUILDDIR)/safety.o
+CORE_TEST_OBJECTS = $(BUILDDIR)/backend.o $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o $(BUILDDIR)/safety.o
 
 .PHONY: all clean test test-python test-neural neural-rt
 

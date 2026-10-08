@@ -1,6 +1,9 @@
 #include <stdio.h>
 
 // forward declarations of test functions
+void test_backend_explicit(void);
+void test_backend_auto(void);
+void test_backend_guards(void);
 void test_config_defaults(void);
 void test_config_env_overrides(void);
 void test_config_invalid_env(void);
@@ -34,6 +37,11 @@ int main(void) {
     test_config_file_roundtrip();
     test_config_validate();
     printf("  [pass] config module tests\n");
+    // execute backend detection tests
+    test_backend_explicit();
+    test_backend_auto();
+    test_backend_guards();
+    printf("  [pass] backend module tests\n");
     // execute patcher unit tests
     test_patcher_replace_all();
     test_patcher_replace_safety();

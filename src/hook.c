@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "vsr/hook.h"
 #include "vsr/config.h"
+#include "vsr/backend.h"
 #include "vsr/logger.h"
 #include "vsr/patcher.h"
 #include "vsr/safety.h"
@@ -330,9 +331,9 @@ static void vsr_hook_maybe_dump(unsigned int shader, const char *combined) {
 }
 
 // snapshot config values safely for hook thread
-static void vsr_hook_snapshot_config(bool *enabled, char *mode, size_t mode_len, float *sharpness, bool *watermark, float *opacity, float *size_frac) {
+static void vsr_hook_snapshot_config(bool *enabled, char *mode, size_t mode_len, char *backend, size_t backend_len, float *sharpness, bool *watermark, float *opacity, float *size_frac) {
     // validate outputs
-    if (!enabled || !mode || !sharpness || !watermark || !opacity || !size_frac) {
+    if (!enabled || !mode || !backend || !sharpness || !watermark || !opacity || !size_frac) {
         return;
     }
     // read global singleton
@@ -350,6 +351,8 @@ static void vsr_hook_snapshot_config(bool *enabled, char *mode, size_t mode_len,
     *size_frac = vsr_safe_clamp_float(cfg->watermark_size, 0.02f, 0.15f);
     // copy mode string safely
     snprintf(mode, mode_len, "%s", cfg->mode);
+    // copy requested backend string safely
+    snprintf(backend, backend_len, "%s", cfg->backend);
 }
 
 // intercepted glShaderSource function
@@ -379,12 +382,17 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
     // snapshot configuration for this call
     bool enabled = false;
     char mode[VSR_MAX_MODE_LEN] = {0};
+    char requested_backend[VSR_MAX_BACKEND_LEN] = {0};
+    char backend[VSR_MAX_BACKEND_LEN] = {0};
     float sharpness = 0.15f;
     bool watermark = false;
     float opacity = 0.45f;
     float size_frac = 0.06f;
     // copy config values
-    vsr_hook_snapshot_config(&enabled, mode, sizeof(mode), &sharpness, &watermark, &opacity, &size_frac);
+    vsr_hook_snapshot_config(&enabled, mode, sizeof(mode), requested_backend, sizeof(requested_backend), &sharpness, &watermark, &opacity, &size_frac);
+    if (!vsr_backend_resolve(requested_backend, backend, sizeof(backend))) {
+        snprintf(backend, sizeof(backend), "generic");
+    }
     // if vsr is disabled, forward call directly
     if (!enabled) {
         vsr_hook_forward_source(shader, count, string, length);
@@ -413,7 +421,7 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
     // inspect if shader matches webrender yuv video pipeline
     if (vsr_patcher_is_target_shader(combined)) {
         // log interception with rate limit
-        vsr_log_info("intercepted video shader, injecting %s upscaler (sharpness: %.2f)", mode, (double)sharpness);
+        vsr_log_info("intercepted video shader, injecting %s upscaler on %s backend (sharpness: %.2f)", mode, backend, (double)sharpness);
         // inject upscaler shader code
         char *patched = vsr_patcher_inject_upscaler_full(combined, mode, sharpness, watermark, opacity, size_frac);
         // handle successful patch
@@ -435,8 +443,8 @@ void glShaderSource(unsigned int shader, int count, const char *const *string, c
                 if (hit_fp) {
                     // format sharpness as integer hundredths to avoid locale decimals
                     int sharp100 = (int)(sharpness * 100.0f + 0.5f);
-                    fprintf(hit_fp, "pid=%d shader=%u mode=%s sharp100=%d wm=%d %zu->%zu\n",
-                        (int)getpid(), shader, mode, sharp100,
+                    fprintf(hit_fp, "pid=%d shader=%u mode=%s backend=%s sharp100=%d wm=%d %zu->%zu\n",
+                        (int)getpid(), shader, mode, backend, sharp100,
                         watermark ? 1 : 0, total_len, patched_len);
                     fclose(hit_fp);
                 }
