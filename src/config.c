@@ -37,6 +37,9 @@ void vsr_config_init_defaults(vsr_config_t *cfg) {
     // set default upscaler mode
     strncpy(cfg->mode, "cas", sizeof(cfg->mode) - 1);
     cfg->mode[sizeof(cfg->mode) - 1] = '\0';
+    // select hardware backend automatically unless overridden
+    strncpy(cfg->backend, "auto", sizeof(cfg->backend) - 1);
+    cfg->backend[sizeof(cfg->backend) - 1] = '\0';
     // clear optional model path
     cfg->model_path[0] = '\0';
 }
@@ -48,6 +51,7 @@ bool vsr_config_validate(vsr_config_t *cfg) {
         vsr_safety_set_error("config null pointer in validate");
         return false;
     }
+    bool valid = true;
     // clamp sharpness into safe range
     cfg->sharpness = vsr_safe_clamp_float(cfg->sharpness, 0.0f, 0.50f);
     // clamp watermark opacity into visible range
@@ -64,16 +68,28 @@ bool vsr_config_validate(vsr_config_t *cfg) {
         strncpy(cfg->mode, "cas", sizeof(cfg->mode) - 1);
         cfg->mode[sizeof(cfg->mode) - 1] = '\0';
         vsr_safety_set_error("unknown vsr mode, fallback to cas");
-        return false;
+        valid = false;
+    }
+    // normalize backend string to lowercase
+    for (size_t i = 0; cfg->backend[i] != '\0' && i < sizeof(cfg->backend); i++) {
+        cfg->backend[i] = (char)tolower((unsigned char)cfg->backend[i]);
+    }
+    // validate backend selection
+    if (strcmp(cfg->backend, "auto") != 0 && strcmp(cfg->backend, "amd") != 0
+        && strcmp(cfg->backend, "nvidia") != 0 && strcmp(cfg->backend, "generic") != 0) {
+        strncpy(cfg->backend, "auto", sizeof(cfg->backend) - 1);
+        cfg->backend[sizeof(cfg->backend) - 1] = '\0';
+        vsr_safety_set_error("unknown vsr backend, fallback to auto");
+        valid = false;
     }
     // validate model path length
     size_t model_len = vsr_safe_strlen(cfg->model_path, sizeof(cfg->model_path));
     if (model_len >= sizeof(cfg->model_path)) {
         cfg->model_path[0] = '\0';
         vsr_safety_set_error("model path too long, cleared");
-        return false;
+        valid = false;
     }
-    return true;
+    return valid;
 }
 
 // resolve default config file path
@@ -224,6 +240,13 @@ static void vsr_config_apply_key(vsr_config_t *cfg, const char *key, const char 
         cfg->mode[sizeof(cfg->mode) - 1] = '\0';
         return;
     }
+    // match hardware backend selection
+    if (strcmp(key, "backend") == 0) {
+        // copy with truncation guard
+        strncpy(cfg->backend, val, sizeof(cfg->backend) - 1);
+        cfg->backend[sizeof(cfg->backend) - 1] = '\0';
+        return;
+    }
     // match optional model path
     if (strcmp(key, "model") == 0 || strcmp(key, "model_path") == 0) {
         // copy with truncation guard
@@ -331,6 +354,8 @@ bool vsr_config_save(const vsr_config_t *cfg, const char *path) {
     fprintf(fp, "sharpness=%.4f\n", (double)cfg->sharpness);
     // write upscaler mode
     fprintf(fp, "mode=%s\n", cfg->mode);
+    // write hardware backend selection
+    fprintf(fp, "backend=%s\n", cfg->backend);
     // write watermark block
     fprintf(fp, "watermark=%d\n", cfg->watermark_enabled ? 1 : 0);
     fprintf(fp, "watermark_opacity=%.4f\n", (double)cfg->watermark_opacity);
@@ -431,6 +456,12 @@ void vsr_config_load(vsr_config_t *cfg) {
     if (mode_env && mode_env[0] != '\0') {
         strncpy(cfg->mode, mode_env, sizeof(cfg->mode) - 1);
         cfg->mode[sizeof(cfg->mode) - 1] = '\0';
+    }
+    // check hardware backend override
+    const char *backend_env = getenv("VSR_BACKEND");
+    if (backend_env && backend_env[0] != '\0') {
+        strncpy(cfg->backend, backend_env, sizeof(cfg->backend) - 1);
+        cfg->backend[sizeof(cfg->backend) - 1] = '\0';
     }
     // check optional model path override
     const char *model_env = getenv("VSR_MODEL");

@@ -21,6 +21,8 @@ void test_config_defaults(void) {
     assert(fabsf(cfg.watermark_size - 0.06f) < 0.001f);
     // assert mode default
     assert(strcmp(cfg.mode, "cas") == 0);
+    // assert automatic backend selection
+    assert(strcmp(cfg.backend, "auto") == 0);
     // assert null guards do not crash
     vsr_config_init_defaults(NULL);
     vsr_config_load(NULL);
@@ -37,6 +39,7 @@ void test_config_env_overrides(void) {
     setenv("VSR_SHARPNESS", "0.35", 1);
     setenv("VSR_WATERMARK", "0", 1);
     setenv("VSR_MODE", "easu", 1);
+    setenv("VSR_BACKEND", "nvidia", 1);
     // load configuration
     vsr_config_t cfg;
     vsr_config_load(&cfg);
@@ -46,12 +49,14 @@ void test_config_env_overrides(void) {
     assert(fabsf(cfg.sharpness - 0.35f) < 0.001f);
     assert(cfg.watermark_enabled == false);
     assert(strcmp(cfg.mode, "easu") == 0);
+    assert(strcmp(cfg.backend, "nvidia") == 0);
     // clean up environment
     unsetenv("VSR_ENABLE");
     unsetenv("VSR_DEBUG");
     unsetenv("VSR_SHARPNESS");
     unsetenv("VSR_WATERMARK");
     unsetenv("VSR_MODE");
+    unsetenv("VSR_BACKEND");
     unsetenv("VSR_CONFIG");
 }
 
@@ -63,6 +68,7 @@ void test_config_invalid_env(void) {
     setenv("VSR_SHARPNESS", "not-a-number", 1);
     setenv("VSR_ENABLE", "maybe", 1);
     setenv("VSR_MODE", "unknown_mode_xyz", 1);
+    setenv("VSR_BACKEND", "unknown_backend_xyz", 1);
     // load configuration
     vsr_config_t cfg;
     vsr_config_load(&cfg);
@@ -70,10 +76,12 @@ void test_config_invalid_env(void) {
     assert(fabsf(cfg.sharpness - 0.15f) < 0.001f);
     assert(cfg.enabled == true);
     assert(strcmp(cfg.mode, "cas") == 0);
+    assert(strcmp(cfg.backend, "auto") == 0);
     // clean up environment
     unsetenv("VSR_SHARPNESS");
     unsetenv("VSR_ENABLE");
     unsetenv("VSR_MODE");
+    unsetenv("VSR_BACKEND");
     unsetenv("VSR_CONFIG");
 }
 
@@ -94,6 +102,7 @@ void test_config_file_roundtrip(void) {
     src.watermark_opacity = 0.7f;
     src.watermark_size = 0.08f;
     strncpy(src.mode, "easu", sizeof(src.mode) - 1);
+    strncpy(src.backend, "amd", sizeof(src.backend) - 1);
     // save to file
     assert(vsr_config_save(&src, tmpl) == true);
     // load into fresh struct
@@ -105,6 +114,7 @@ void test_config_file_roundtrip(void) {
     assert(dst.debug == false);
     assert(fabsf(dst.sharpness - 0.31f) < 0.001f);
     assert(strcmp(dst.mode, "easu") == 0);
+    assert(strcmp(dst.backend, "amd") == 0);
     assert(fabsf(dst.watermark_opacity - 0.7f) < 0.001f);
     // test missing file returns false safely
     assert(vsr_config_load_file(&dst, "/tmp/vsr-definitely-missing-12345.ini") == false);

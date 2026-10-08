@@ -45,5 +45,6 @@ float vsr_safe_clamp_float(float val, float min_val, float max_val);
 #define VSR_MAX_CONFIG_LINE 1024
 #define VSR_MAX_PATH_LEN 1024
 #define VSR_MAX_MODE_LEN 16
+#define VSR_MAX_BACKEND_LEN 16
 
 #endif // VSR_SAFETY_H

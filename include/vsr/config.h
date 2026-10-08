@@ -14,6 +14,7 @@ typedef struct {
     float watermark_opacity;
     float watermark_size;
     char mode[VSR_MAX_MODE_LEN];
+    char backend[VSR_MAX_BACKEND_LEN];
     char model_path[VSR_MAX_PATH_LEN];
 } vsr_config_t;
 
