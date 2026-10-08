@@ -30,6 +30,7 @@ enable=1
 debug=1
 sharpness=0.15
 mode=cas
+backend=auto
 watermark=1
 watermark_opacity=0.45
 watermark_size=0.06
@@ -48,7 +49,7 @@ usage: linux-vsr [command] [args]
   edit                    open config in $EDITOR
   help                    show this help
 env overrides:
-  VSR_ENABLE, VSR_DEBUG, VSR_SHARPNESS, VSR_MODE
+  VSR_ENABLE, VSR_DEBUG, VSR_SHARPNESS, VSR_MODE, VSR_BACKEND
   VSR_WATERMARK, VSR_WATERMARK_OPACITY, VSR_WATERMARK_SIZE
   VSR_MODEL, VSR_CONFIG
 examples:
@@ -117,6 +118,7 @@ cmd_launch() {
     export VSR_DEBUG="${VSR_DEBUG:-1}"
     export VSR_ENABLE="${VSR_ENABLE:-1}"
     export VSR_MODE="${VSR_MODE:-cas}"
+    export VSR_BACKEND="${VSR_BACKEND:-auto}"
     export VSR_WATERMARK="${VSR_WATERMARK:-1}"
     export VSR_WATERMARK_OPACITY="${VSR_WATERMARK_OPACITY:-0.45}"
     export VSR_WATERMARK_SIZE="${VSR_WATERMARK_SIZE:-0.06}"

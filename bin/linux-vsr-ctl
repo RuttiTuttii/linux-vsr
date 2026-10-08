@@ -21,6 +21,7 @@ enable=1
 debug=1
 sharpness=0.15
 mode=cas
+backend=auto
 watermark=1
 watermark_opacity=0.45
 watermark_size=0.06
@@ -35,6 +36,7 @@ usage: linux-vsr-ctl <command> [args]
   get <key>              read single key
   set <key> <value>      write key and hot-reload
   mode cas|easu|off      switch upscaler
+  backend auto|amd|nvidia|generic  select hardware backend
   sharpness <0.0-0.5>    set sharpness
   watermark on|off       toggle badge
   opacity <0.05-1.0>    set badge opacity
@@ -152,6 +154,15 @@ case "${cmd}" in
             exit 1
         fi
         cfg_set "mode" "${m}"
+        ;;
+    # select hardware backend
+    backend)
+        b="${2:-}"
+        if [[ "${b}" != "auto" && "${b}" != "amd" && "${b}" != "nvidia" && "${b}" != "generic" ]]; then
+            echo "backend must be auto/amd/nvidia/generic" >&2
+            exit 1
+        fi
+        cfg_set "backend" "${b}"
         ;;
     # set sharpness
     sharpness)
