@@ -4,7 +4,7 @@ linux-vsr - модульный графический слой и драйвер
 
 работает с любыми браузерами (zen browser, firefox, chromium, chrome, brave) и медиаплеерами (mpv).
 
-проект перехватывает компиляцию opengl/egl-шейдеров на лету и заменяет стандартную билинейную интерполяцию видеотекстуры на amd fidelityfx contrast adaptive sharpening (cas), edge-adaptive spatial upsampling (easu) или экспериментальный directional sharpen прямо в графическом конвейере видеокарты без копирования кадров. Лаунчер по умолчанию переводит Chromium и Brave на ANGLE/OpenGL под Xwayland, поэтому тот же hook работает в Chromium, Firefox и Zen; `VSR_CHROMIUM_GL=0` оставляет исходный backend Chromium.
+проект перехватывает компиляцию opengl/egl-шейдеров на лету и заменяет стандартную билинейную интерполяцию видеотекстуры на amd fidelityfx contrast adaptive sharpening (cas), edge-adaptive spatial upsampling (easu) или экспериментальный directional sharpen прямо в графическом конвейере видеокарты без копирования кадров. Лаунчер умеет направить Chromium через ANGLE/OpenGL к hook; проверенный видеопуть сейчас покрывает Firefox и Zen WebRender, а сигнатуры Chromium и чистый Vulkan ещё интегрируются.
 
 ---
 
@@ -211,7 +211,7 @@ VSR_BACKEND=nvidia ./bin/linux-vsr
 
 * **песочницы браузера (security trade-off):** для доставки `LD_PRELOAD` в дочерние gpu/rdd-процессы gecko требуется отключать внутренние песочницы (`MOZ_DISABLE_*_SANDBOX=1`). это осознанный компромисс безопасности, о котором браузер может предупреждать при запуске.
 * **работа с уже запущенным браузером:** если zen или firefox уже запущен в системе, вызов `./bin/linux-vsr` без изоляции профиля передаст команду работающему процессу без нашего хука. требуется либо запускать браузер через скрипт изначально, либо использовать инжект через `./bin/linux-vsr attach <pid>`.
-* **выбор браузерного backend:** Firefox и Zen используют штатный WebRender/OpenGL. Лаунчер запускает Chromium и Brave через ANGLE/OpenGL под Xwayland, чтобы они попадали в тот же GLSL hook; чистый Vulkan/Graphite остаётся отдельным путём.
+* **выбор браузерного backend:** Firefox и Zen используют штатный WebRender/OpenGL. При включённом `VSR_CHROMIUM_GL` лаунчер запускает Chromium и Brave через ANGLE/OpenGL под Xwayland, но сигнатуры видеошейдеров Chromium требуют проверки для каждой связки GPU/драйвер; чистый Vulkan/Graphite остаётся отдельным путём.
 * **отсутствие in-video gui:** на уровне перехвата компиляции `glShaderSource` невозможно отрендерить интерактивные кнопки или кликабельное меню поверх видеокадра. все управление вынесено в cli-утилиту `linux-vsr-ctl`.
 * **vulkan бэкенд:** при принудительном переключении браузера на чистый vulkan (`gfx.webrender.all=true` с wgpu/vulkan) перехват через opengl/egl не срабатывает. требуется отдельный слой перехвата `vkCreateShaderModule` и патчинга spir-v.
 * **nvidia и amd в браузере:** текущий нативный hook применяет GLSL-фрагментный путь на обоих вендорах и записывает определённый DRM backend. Проприетарный AI-путь NVIDIA RTX Video Super Resolution требует отдельной compute/SDK-интеграции; `VSR_BACKEND=nvidia` не выдаёт текущий shader path за эту модель.
