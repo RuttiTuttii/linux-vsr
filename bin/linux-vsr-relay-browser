@@ -6,6 +6,16 @@
 
 set -u
 
+# resolve repository and preload the native browser hook
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lib_vsr="${script_dir}/libvsr.so"
+if [ ! -f "${lib_vsr}" ]; then
+    echo "[relay-browser] native hook missing, building it..." >&2
+    make -C "${script_dir}" -j"$(nproc)"
+fi
+export LD_PRELOAD="${lib_vsr}${LD_PRELOAD:+:${LD_PRELOAD}}"
+export VSR_BACKEND="${VSR_BACKEND:-auto}"
+
 # parse debugging port
 port="${1:-9222}"
 if [ "${1:-}" = "--port" ]; then
