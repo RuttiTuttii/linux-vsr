@@ -12,6 +12,7 @@ it intercepts opengl and egl shader compilation on the fly and upgrades naive bi
 * runtime hot reload: updates sharpness and upscaler modes on the fly via monotonic config file polling without restarting the browser.
 * corner badge watermark: baked-in diagnostic indicator to visually verify active shader patching.
 * modular monolith in pure c: clean separation of concerns, defensive arithmetic and memory guards (`safety`), internal symbol hiding (`-fvisibility=hidden`).
+* vendor-aware browser path: automatic DRM detection for AMD, NVIDIA, and generic GPUs with an explicit `VSR_BACKEND` override.
 * full cli tool suite: automated sandbox-bypassing launcher, runtime control cli with profiles, and an interactive shader dump wizard.
 
 ---
@@ -186,6 +187,7 @@ settings are stored in `~/.config/linux-vsr/config.ini` and can also be overridd
 |---|---|---|
 | `enable` / `VSR_ENABLE` | `1` | toggle upscaling (`1` to enable, `0` to bypass) |
 | `mode` / `VSR_MODE` | `cas` | upscaler algorithm (`cas`, `easu`, `off`) |
+| `backend` / `VSR_BACKEND` | `auto` | hardware path (`auto`, `amd`, `nvidia`, `generic`) |
 | `sharpness` / `VSR_SHARPNESS` | `0.15` | adaptive sharpening strength (`0.0` to `0.50`) |
 | `debug` / `VSR_DEBUG` | `1` | output diagnostic messages to stderr |
 | `watermark` / `VSR_WATERMARK` | `1` | display corner badge verification indicator |
@@ -198,6 +200,9 @@ example:
 
 ```bash
 VSR_MODE=cas VSR_SHARPNESS=0.30 ./bin/linux-vsr
+
+# force the detected hardware path for diagnostics or A/B testing
+VSR_BACKEND=nvidia ./bin/linux-vsr
 ```
 
 ---
@@ -209,6 +214,7 @@ VSR_MODE=cas VSR_SHARPNESS=0.30 ./bin/linux-vsr
 * **webrender focus:** the shader patcher is currently tuned and verified against webrender (zen browser, mozilla firefox). chromium (skia) and mpv (gpu-next) utilize different shader variable names and pipelines; dedicated signatures for them are work in progress.
 * **no in-video interactive gui:** interactive buttons and overlays cannot be drawn from the `glShaderSource` compilation layer without separate render passes. all live tuning is handled via the `linux-vsr-ctl` cli tool.
 * **vulkan backend bypass:** if the browser is forced to run on pure vulkan, opengl/egl interception is bypassed. support for vulkan requires hooking `vkCreateShaderModule` with spir-v byte patching.
+* **nvidia and amd browser path:** the current native hook applies the GLSL fragment path on both vendors and records the resolved DRM backend. NVIDIA's proprietary RTX Video Super Resolution AI path is a separate compute/SDK integration; `VSR_BACKEND=nvidia` does not claim to emulate that proprietary model.
 * **ai super resolution status:** compiled tensorrt `.engine` models for rtx 5070 are prepared, but direct in-pipeline cuda-gl interop inference inside the hook is currently under development.
 
 ---
@@ -216,4 +222,3 @@ VSR_MODE=cas VSR_SHARPNESS=0.30 ./bin/linux-vsr
 ### license
 
 mit license - see [LICENSE](LICENSE) for details.
-

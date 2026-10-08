@@ -12,6 +12,17 @@
 
 ## планы
 
+### браузерные GPU backends
+- сделано: нативный OpenGL/GLSL hook для Firefox/Zen, автоопределение AMD/NVIDIA через DRM,
+  ручной выбор `VSR_BACKEND=auto|amd|nvidia|generic` и запись backend в hit-log
+- следующий шаг: отдельный Chromium/ANGLE путь; на Wayland Chromium обычно использует
+  ANGLE/Vulkan и не вызывает перехваченный `glShaderSource`
+- после этого: Vulkan `vkCreateShaderModule`/SPIR-V слой с безопасным байпасом при
+  неизвестной схеме шейдера
+- NVIDIA RTX Video Super Resolution AI и AMD shader path считаются разными backend-ами:
+  текущий браузерный hook даёт vendor-neutral GLSL апскейл, а AI inference требует
+  отдельного compute/SDK конвейера без подмены названия в диагностике
+
 ### zero-copy выход в vo (следующий шаг нейро-яруса)
 - сейчас: вход zero-copy (cuda nv12 -> npp rgba -> infer), выход через
   download в rgb24 для vo
