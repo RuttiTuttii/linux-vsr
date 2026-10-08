@@ -31,7 +31,7 @@ linux-vsr/
 │   ├── logger.h      # форматированный диагностический вывод с троттлингом
 │   ├── patcher.h     # синтаксический анализ glsl и замена семплирования
 │   ├── safety.h      # безопасная арифметика, лимиты памяти и clamp
-│   └── shaders.h     # генератор кода шейдеров cas/easu с вотермарком
+│   └── shaders.h     # генератор кода шейдеров cas/easu/directional с вотермарком
 ├── src/
 │   ├── config.c      # реализация загрузки, валидации и сохранения конфига
 │   ├── hook.c        # интерпозиция glshadersource, glcompileshader, eglGetProcAddress
@@ -72,7 +72,7 @@ linux-vsr/
        ▼
 прослойка linux-vsr (libvsr.so через ld_preload)
        │  перехватывает glshadersource
-       │  заменяет билинейный семплинг luma на fidelityfx cas / easu
+       │  заменяет билинейный семплинг luma на fidelityfx cas / easu / directional
        ▼
 выполнение на gpu (шейдерные блоки видеокарты)
        │  время обработки кадра: 0.02 мс

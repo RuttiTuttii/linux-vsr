@@ -29,7 +29,7 @@ linux-vsr/
 │   ├── logger.h      # rate-limited diagnostic logging subsystem
 │   ├── patcher.h     # glsl syntax inspection and luma sampler replacement
 │   ├── safety.h      # checked arithmetic, memory limits and float clamping
-│   └── shaders.h     # embedded glsl cas and easu shader generators
+│   └── shaders.h     # embedded glsl cas, easu, and directional shader generators
 ├── src/
 │   ├── config.c      # configuration state, validation and serialization
 │   ├── hook.c        # glshadersource, glcompileshader, eglgetprocaddress hooks
@@ -70,7 +70,7 @@ browser compositor (webrender / opengl / egl)
         ▼
 linux-vsr shim (libvsr.so via ld_preload)
         │  intercepts glshadersource
-        │  replaces bilinear luma sampling with fidelityfx cas / easu
+        │  replaces bilinear luma sampling with fidelityfx cas / easu / directional
         ▼
 gpu execution (nvidia rtx / shaders)
         │  0.02 ms per frame processing latency

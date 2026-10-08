@@ -210,7 +210,7 @@ case "${cmd}" in
             # remove model line to disable
             grep -viE "^[[:space:]]*model[[:space:]]*=" "${cfg_file}" > "${cfg_file}.tmp" || true
             mv "${cfg_file}.tmp" "${cfg_file}"
-            echo "[linux-vsr] model disabled, using glsl cas/easu path"
+                echo "[linux-vsr] model disabled, using glsl cas/easu/directional path"
         else
             # warn when file missing but allow future path
             if [ ! -f "${p}" ]; then
