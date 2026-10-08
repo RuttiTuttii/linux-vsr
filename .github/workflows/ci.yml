@@ -32,6 +32,14 @@ jobs:
         run: |
           make CC=${{ matrix.compiler }} test
 
+      - name: run neural runtime guard tests (${{ matrix.compiler }})
+        run: |
+          make CC=${{ matrix.compiler }} test-neural
+
+      - name: run relay helper tests
+        run: |
+          make test-python
+
       - name: verify binary output
         run: |
           test -f libvsr.so
