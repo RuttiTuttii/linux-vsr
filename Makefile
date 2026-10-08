@@ -1,4 +1,5 @@
 CC ?= gcc
+PYTHON ?= python3
 CFLAGS ?= -O2 -Wall -Wextra -Werror -fPIC -Iinclude -pthread -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fvisibility=hidden
 LDFLAGS ?= -shared -ldl -pthread
 
@@ -18,7 +19,7 @@ TEST_OBJECTS = $(patsubst $(TESTDIR)/%.c, $(BUILDDIR)/%.o, $(TEST_SOURCES))
 # modules needed for tests (excluding hook and main which intercept symbols)
 CORE_TEST_OBJECTS = $(BUILDDIR)/config.o $(BUILDDIR)/shaders.o $(BUILDDIR)/patcher.o $(BUILDDIR)/logger.o $(BUILDDIR)/safety.o
 
-.PHONY: all clean test test-neural neural-rt
+.PHONY: all clean test test-python test-neural neural-rt
 
 all: $(LIB_TARGET)
 
@@ -55,6 +56,10 @@ $(LIB_TARGET): $(OBJECTS)
 
 test: $(TEST_TARGET)
 	./$(TEST_TARGET)
+
+test-python:
+	$(PYTHON) neural/relay/test_boxes.py
+	$(PYTHON) neural/relay/test_relay.py
 
 $(TEST_TARGET): $(CORE_TEST_OBJECTS) $(TEST_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
