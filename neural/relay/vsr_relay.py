@@ -299,10 +299,10 @@ def main():
                     "request": rid,
                     "statusCode": out_status,
                     "headers": bidi_headers(out_headers),
-                    "body": {"type": "base64", "value": base64.b64encode(out_body).decode()},
+                    "body": {"type": "base64", "value": base64.b64encode(part).decode()},
                 },
             )
-            print(f"served {len(out_body)}b for {url[:80]}")
+            print(f"served {len(part)}b for {url[:80]}")
         except Exception as ex:
             print("fulfill failed:", str(ex)[:100])
 
